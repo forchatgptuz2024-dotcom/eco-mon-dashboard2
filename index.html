@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Eco Mon 3.0 — облачный дашборд</title>
+<title>Eco Mon 4.0 — облачный дашборд</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
 <style>
@@ -42,11 +42,24 @@
   .formula-note { color:#999; font-size:0.85em; font-style:italic; }
   .status-line { text-align:center; color:#666; font-size:0.8em; margin-bottom:10px; }
   .config-warning { background:#442222; border:1px solid #a55; border-radius:8px; padding:14px; margin-bottom:16px; }
+  .device-info-card { position:fixed; top:16px; right:16px; width:260px; z-index:1000; box-shadow:0 4px 14px rgba(0,0,0,0.5); }
+  .device-info-card textarea { width:100%; box-sizing:border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:8px; font-family:inherit; resize:vertical; margin-bottom:8px; }
+  @media (max-width: 900px) { .device-info-card { position:static; width:auto; margin-bottom:20px; } }
 </style>
 </head>
 <body>
-<h1>Устройство комплексного экологического мониторинга — Eco Mon 3.0 (облако)</h1>
+<h1>Устройство комплексного экологического мониторинга — Eco Mon 4.0 (облако)</h1>
 <div class="status-line" id="status_line">Подключение к Firebase...</div>
+
+<div class="card device-info-card" id="device_info_card">
+  <div class="card-head">
+    <h3>Расположение / заметки</h3>
+    <button class="main-btn" id="device_info_toggle">▾</button>
+  </div>
+  <textarea id="device_info_text" rows="4" placeholder="Например: датчик на балконе, окно на север..."></textarea>
+  <button class="action-btn" id="device_info_save">Сохранить</button>
+  <span id="device_info_status"></span>
+</div>
 
 <div id="config-warning" class="config-warning" style="display:none">
   Впиши адрес своей Firebase Realtime Database в переменную <code>FIREBASE_HOST</code> в начале файла index.html.
@@ -272,6 +285,45 @@ document.getElementById('anomaly_list').addEventListener('click', (e) => {
   renderAnomalies();
 });
 
+// ---------- Заметки о расположении устройства ----------
+const loadDeviceInfo = async () => {
+  try {
+    const res = await fetch(`${FIREBASE_HOST}/device_info.json`);
+    if (res.ok) {
+      const text = await res.json();
+      document.getElementById('device_info_text').value = text || '';
+    }
+  } catch (e) { console.error(e); }
+};
+
+document.getElementById('device_info_save').addEventListener('click', async () => {
+  const text = document.getElementById('device_info_text').value;
+  const status = document.getElementById('device_info_status');
+  try {
+    const res = await fetch(`${FIREBASE_HOST}/device_info.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(text)
+    });
+    status.textContent = res.ok ? 'Сохранено ✓' : 'Ошибка сохранения';
+  } catch (e) {
+    status.textContent = 'Ошибка сохранения';
+  }
+  setTimeout(() => status.textContent = '', 2000);
+});
+
+document.getElementById('device_info_toggle').addEventListener('click', () => {
+  const ta = document.getElementById('device_info_text');
+  const saveBtn = document.getElementById('device_info_save');
+  const btn = document.getElementById('device_info_toggle');
+  const hidden = ta.style.display === 'none';
+  ta.style.display = hidden ? 'block' : 'none';
+  saveBtn.style.display = hidden ? 'inline-block' : 'none';
+  btn.textContent = hidden ? '▾' : '▸';
+});
+
+loadDeviceInfo();
+
 // ---------- Загрузка данных из Firebase ----------
 const firebaseObjectToArray = (obj) => {
   if (!obj) return [];
@@ -314,16 +366,38 @@ const loadFromFirebase = async () => {
 // ---------- Экспорт за период ----------
 const toEpoch = (id, fallback) => {
   const v = document.getElementById(id).value;
-  return v ? Math.floor(new Date(v).getTime() / 1000) : fallback;
+  if (!v) return fallback;
+  const t = new Date(v).getTime();
+  return isNaN(t) ? fallback : Math.floor(t / 1000);
 };
 
 const csvEscape = (v) => String(v);
+
+const toLocalInputValue = (d) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const setDateRange = (fromId, toId, fromDate, toDate) => {
+  document.getElementById(fromId).value = toLocalInputValue(fromDate);
+  document.getElementById(toId).value = toLocalInputValue(toDate);
+};
+
+// Заполняем поля периодов разумными значениями по умолчанию,
+// чтобы кнопки сразу работали без ручного выбора дат
+const nowDate = new Date();
+const h24ago = new Date(nowDate.getTime() - 24 * 3600 * 1000);
+const h48ago = new Date(nowDate.getTime() - 48 * 3600 * 1000);
+setDateRange('export_from', 'export_to', h24ago, nowDate);
+setDateRange('cmp_from1', 'cmp_to1', h24ago, nowDate);
+setDateRange('cmp_from2', 'cmp_to2', h48ago, h24ago);
+setDateRange('co2_from', 'co2_to', h24ago, nowDate);
 
 document.getElementById('export_btn').addEventListener('click', () => {
   const from = toEpoch('export_from', 0);
   const to = toEpoch('export_to', 9999999999);
   const rows = allPoints.filter(p => p.ts >= from && p.ts <= to);
-  if (rows.length === 0) { alert('Нет данных за этот период'); return; }
+  if (rows.length === 0) { alert('Нет данных за этот период. Проверь даты или подожди, пока накопится история.'); return; }
   let csv = '\uFEFF' + 'Дата;Время;Температура_C;Влажность_%;Давление_гПа;eCO2_ppm;TVOC_ppb;Дождь_аналог;PM1;PM2.5\n';
   rows.forEach(p => {
     const d = new Date(p.ts * 1000);
@@ -332,10 +406,14 @@ document.getElementById('export_btn').addEventListener('click', () => {
     csv += `${dateStr};${timeStr};${csvEscape(p.temp)};${csvEscape(p.humidity)};${csvEscape(p.pressure)};${csvEscape(p.eco2)};${csvEscape(p.tvoc)};${csvEscape(p.rain)};${csvEscape(p.pm1)};${csvEscape(p.pm25)}\n`;
   });
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
+  link.href = url;
   link.download = 'eco_mon_export.csv';
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 });
 
 // ---------- Сравнение периодов ----------
@@ -353,6 +431,10 @@ document.getElementById('cmp_btn').addEventListener('click', () => {
   const f2 = toEpoch('cmp_from2', 0), t2 = toEpoch('cmp_to2', 9999999999);
   const r1 = averageForRange(f1, t1);
   const r2 = averageForRange(f2, t2);
+  if (r1.count === 0 && r2.count === 0) {
+    document.getElementById('cmp_result').innerHTML = '<p>Нет данных ни за один из периодов. Проверь даты.</p>';
+    return;
+  }
   const rows = metrics.map(m => {
     const v1 = r1.avg[m.key] || 0, v2 = r2.avg[m.key] || 0;
     return `<tr><td>${m.label}</td><td>${v1}</td><td>${v2}</td><td>${(v2 - v1).toFixed(2)}</td></tr>`;
