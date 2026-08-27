@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eco Mon 3.0 — облачный дашборд</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
+<style>
+  body { font-family: sans-serif; background:#111; color:#eee; margin:0; padding:16px; }
+  h1 { text-align:center; font-size:1.3em; }
+  h3 { margin:4px 0 8px 0; font-size:1em; color:#8ecae6; }
+  .card { background:#1c1c1c; border-radius:10px; padding:14px; margin-bottom:20px; }
+  .card-head { display:flex; justify-content:space-between; align-items:center; }
+  .main-btn { background:#222; color:#8ecae6; border:1px solid #444; padding:4px 10px; border-radius:5px; cursor:pointer; font-size:0.8em; }
+  .main-btn:disabled { color:#666; cursor:default; }
+  .val { font-size:1.4em; font-weight:bold; }
+  .main-chart { border:2px solid #ffd166; }
+  .main-chart canvas { max-height:320px; }
+  .main-chart .val { font-size:2.2em; color:#ffd166; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:20px; }
+  canvas { max-height:200px; }
+  .hint { color:#666; font-size:0.75em; margin-top:2px; }
+  .range-panel { text-align:center; margin:14px 0; }
+  .range-selector { display:flex; justify-content:center; gap:6px; flex-wrap:wrap; }
+  .range-selector button { background:#222; color:#eee; border:1px solid #444; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:0.95em; }
+  .range-selector button.active { background:#8ecae6; color:#111; font-weight:bold; }
+  .anomaly-card { border:2px solid #ef476f; }
+  .anomaly-card h3 { color:#ef476f; }
+  .anomaly-list { max-height:260px; overflow-y:auto; }
+  .anomaly-item { padding:8px 4px; border-bottom:1px solid #333; font-size:0.9em; cursor:pointer; }
+  .anomaly-item:hover { background:#222; }
+  .anomaly-item .time { color:#888; margin-right:8px; }
+  .anomaly-item .sensor { color:#ffd166; font-weight:bold; margin-right:6px; }
+  .anomaly-snapshot { background:#181818; border-radius:6px; padding:8px; margin:2px 0 10px 0; font-size:0.85em; display:grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap:4px; }
+  .period-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:8px; }
+  .period-row label { font-size:0.85em; color:#aaa; }
+  input[type="datetime-local"] { background:#222; color:#eee; border:1px solid #444; border-radius:4px; padding:5px; }
+  button.action-btn { background:#8ecae6; color:#111; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold; }
+  .cmp-table { width:100%; border-collapse:collapse; margin-top:8px; font-size:0.9em; }
+  .cmp-table th, .cmp-table td { border-bottom:1px solid #333; padding:6px 8px; text-align:left; }
+  .formula-note { color:#999; font-size:0.85em; font-style:italic; }
+  .status-line { text-align:center; color:#666; font-size:0.8em; margin-bottom:10px; }
+  .config-warning { background:#442222; border:1px solid #a55; border-radius:8px; padding:14px; margin-bottom:16px; }
+</style>
+</head>
+<body>
+<h1>Устройство комплексного экологического мониторинга — Eco Mon 3.0 (облако)</h1>
+<div class="status-line" id="status_line">Подключение к Firebase...</div>
+
+<div id="config-warning" class="config-warning" style="display:none">
+  Впиши адрес своей Firebase Realtime Database в переменную <code>FIREBASE_HOST</code> в начале файла index.html.
+</div>
+
+<div class="range-panel">
+  <div class="range-selector" id="range_selector">
+    <button data-range="hour1" class="active">Последний час</button>
+    <button data-range="hour6">6 часов</button>
+    <button data-range="day1">Сутки</button>
+    <button data-range="day7">7 дней</button>
+    <button data-range="all">Всё</button>
+  </div>
+</div>
+
+<div id="main-container"></div>
+
+<div class="card anomaly-card">
+  <h3>Резкие изменения / аномалии</h3>
+  <div id="anomaly_list" class="anomaly-list">Пока всё в норме</div>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="card">
+  <h3>Экспорт данных за период (CSV / Excel)</h3>
+  <div class="period-row">
+    <label>С:<br><input type="datetime-local" id="export_from"></label>
+    <label>По:<br><input type="datetime-local" id="export_to"></label>
+    <button class="action-btn" id="export_btn">Скачать за период</button>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Сравнение показателей по двум периодам</h3>
+  <div class="period-row"><b>Период 1:</b>
+    <label>С:<br><input type="datetime-local" id="cmp_from1"></label>
+    <label>По:<br><input type="datetime-local" id="cmp_to1"></label>
+  </div>
+  <div class="period-row"><b>Период 2:</b>
+    <label>С:<br><input type="datetime-local" id="cmp_from2"></label>
+    <label>По:<br><input type="datetime-local" id="cmp_to2"></label>
+  </div>
+  <button class="action-btn" id="cmp_btn">Сравнить</button>
+  <div id="cmp_result"></div>
+</div>
+
+<div class="card">
+  <h3>CO₂: перевод ppm → мг/м³</h3>
+  <p class="formula-note">C = (P × M × ppm) / (R × T) × 0.001 — P: давление, Па; M = 44.01 г/моль; R = 8.314 Дж/(моль·К); T: температура, К</p>
+  <div class="period-row">
+    <label>С:<br><input type="datetime-local" id="co2_from"></label>
+    <label>По:<br><input type="datetime-local" id="co2_to"></label>
+    <button class="action-btn" id="co2_calc_btn">Рассчитать</button>
+  </div>
+  <div id="co2_result"></div>
+</div>
+
+<script>
+// ================== НАСТРОЙКА ==================
+const FIREBASE_HOST = "https://eco-mon-9b4fe-default-rtdb.europe-west1.firebasedatabase.app";
+// Чтение публичное (иначе страница ничего не покажет без входа), запись защищена
+// авторизацией устройства — см. правила базы и настройки в прошивке ESP32.
+// =====================================================================================================
+
+if (false) {
+  document.getElementById('config-warning').style.display = 'block';
+}
+
+let mainMetricKey = 'eco2';
+let currentRange = 'hour1';
+let allPoints = [];       // весь загруженный массив точек из Firebase
+let lastAnomalies = [];
+let expandedAnomalyIdx = null;
+
+const metrics = [
+  {key:'eco2',    label:'CO2 (eCO2), ppm', color:'#ffd166'},
+  {key:'temp',    label:'Температура, °C', color:'#ef476f'},
+  {key:'humidity',label:'Влажность, %',    color:'#118ab2'},
+  {key:'pressure',label:'Давление, гПа',   color:'#06d6a0'},
+  {key:'tvoc',    label:'TVOC, ppb',       color:'#f78c6b'},
+  {key:'rain',    label:'Дождь (аналог)',  color:'#8338ec'},
+  {key:'pm1',     label:'Пыль PM1',        color:'#c9cba3'},
+  {key:'pm25',    label:'Пыль PM2.5',      color:'#ffb703'},
+];
+
+const cardEls = {};
+const charts = {};
+
+const createCard = (m) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.key = m.key;
+  card.innerHTML = `
+    <div class="card-head">
+      <h3>${m.label}</h3>
+      <button class="main-btn" data-key="${m.key}">Сделать главным</button>
+    </div>
+    <div class="val" id="val_${m.key}">--</div>
+    <canvas id="chart_${m.key}"></canvas>
+    <div class="hint">Тяни график мышью, чтобы прокрутить время, колесо — масштаб</div>
+  `;
+  return card;
+};
+
+metrics.forEach(m => {
+  const card = createCard(m);
+  cardEls[m.key] = card;
+  const ctx = card.querySelector('canvas').getContext('2d');
+  charts[m.key] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: m.label, data: [], borderColor: m.color, backgroundColor: m.color + '22', fill:false, tension:0.3, pointRadius:0 }] },
+    options: {
+      animation:false,
+      scales: { x: { ticks:{ color:'#777', maxRotation:0 } }, y: { ticks:{ color:'#aaa' } } },
+      plugins: {
+        legend:{ display:false },
+        zoom: { pan:{ enabled:true, mode:'x' }, zoom:{ wheel:{ enabled:true }, pinch:{ enabled:true }, mode:'x' } }
+      }
+    }
+  });
+});
+
+document.getElementById('main-container').appendChild(cardEls['eco2']);
+cardEls['eco2'].classList.add('main-chart');
+metrics.forEach(m => { if (m.key !== 'eco2') document.getElementById('grid').appendChild(cardEls[m.key]); });
+
+const updateMainButtons = () => {
+  metrics.forEach(m => {
+    const btn = cardEls[m.key].querySelector('.main-btn');
+    if (m.key === mainMetricKey) { btn.textContent = 'Главный график'; btn.disabled = true; }
+    else { btn.textContent = 'Сделать главным'; btn.disabled = false; }
+  });
+};
+updateMainButtons();
+
+const setMainMetric = (key) => {
+  if (key === mainMetricKey) return;
+  cardEls[mainMetricKey].classList.remove('main-chart');
+  document.getElementById('grid').appendChild(cardEls[mainMetricKey]);
+  cardEls[key].classList.add('main-chart');
+  document.getElementById('main-container').appendChild(cardEls[key]);
+  mainMetricKey = key;
+  updateMainButtons();
+  Object.values(charts).forEach(c => c.resize());
+};
+
+document.addEventListener('click', (e) => {
+  if (e.target.classList.contains('main-btn') && !e.target.disabled) setMainMetric(e.target.dataset.key);
+});
+
+const formatTs = (ts, spanSec) => {
+  const d = new Date(ts * 1000);
+  if (spanSec <= 3 * 3600) return d.toLocaleTimeString('ru-RU');
+  if (spanSec <= 2 * 24 * 3600) return d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+  return d.toLocaleDateString('ru-RU', {day:'2-digit', month:'2-digit'}) + ' ' + d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+};
+
+const rangeToSeconds = (range) => {
+  const map = { hour1:3600, hour6:6*3600, day1:24*3600, day7:7*24*3600, all:Infinity };
+  return map[range] ?? 3600;
+};
+
+const filterByRange = (points, range) => {
+  const spanSec = rangeToSeconds(range);
+  if (spanSec === Infinity) return points;
+  const nowTs = points.length ? points[points.length - 1].ts : Math.floor(Date.now()/1000);
+  const cutoff = nowTs - spanSec;
+  return points.filter(p => p.ts >= cutoff);
+};
+
+const redrawCharts = () => {
+  const filtered = filterByRange(allPoints, currentRange);
+  const spanSec = rangeToSeconds(currentRange);
+  const labels = filtered.map(p => formatTs(p.ts, spanSec === Infinity ? 30*24*3600 : spanSec));
+  metrics.forEach(m => {
+    charts[m.key].data.labels = labels;
+    charts[m.key].data.datasets[0].data = filtered.map(p => p[m.key]);
+    charts[m.key].update('none');
+  });
+  if (filtered.length > 0) {
+    const last = filtered[filtered.length - 1];
+    metrics.forEach(m => { document.getElementById('val_' + m.key).textContent = last[m.key]; });
+  }
+};
+
+document.getElementById('range_selector').addEventListener('click', (e) => {
+  if (e.target.tagName !== 'BUTTON') return;
+  document.querySelectorAll('#range_selector button').forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+  currentRange = e.target.dataset.range;
+  redrawCharts();
+});
+
+const renderAnomalies = () => {
+  const box = document.getElementById('anomaly_list');
+  if (!lastAnomalies || lastAnomalies.length === 0) { box.textContent = 'Пока всё в норме'; return; }
+  const reversed = lastAnomalies.slice().reverse();
+  box.innerHTML = reversed.map((a, idx) => {
+    const time = new Date(a.ts * 1000).toLocaleString('ru-RU');
+    let html = `<div class="anomaly-item" data-idx="${idx}"><span class="time">${time}</span><span class="sensor">${a.sensor}</span>${a.message} (${a.value})</div>`;
+    if (expandedAnomalyIdx === idx) {
+      html += `<div class="anomaly-snapshot">
+        <div>Температура: ${a.temp} °C</div>
+        <div>Влажность: ${a.humidity} %</div>
+        <div>Давление: ${a.pressure} гПа</div>
+        <div>eCO2: ${a.eco2} ppm</div>
+        <div>TVOC: ${a.tvoc} ppb</div>
+        <div>Дождь: ${a.rain}</div>
+        <div>PM1: ${a.pm1}</div>
+        <div>PM2.5: ${a.pm25}</div>
+      </div>`;
+    }
+    return html;
+  }).join('');
+};
+
+document.getElementById('anomaly_list').addEventListener('click', (e) => {
+  const item = e.target.closest('.anomaly-item');
+  if (!item) return;
+  const idx = parseInt(item.dataset.idx);
+  expandedAnomalyIdx = (expandedAnomalyIdx === idx) ? null : idx;
+  renderAnomalies();
+});
+
+// ---------- Загрузка данных из Firebase ----------
+const firebaseObjectToArray = (obj) => {
+  if (!obj) return [];
+  return Object.values(obj);
+};
+
+const loadFromFirebase = async () => {
+  try {
+    const [historyRes, anomaliesRes] = await Promise.all([
+      fetch(`${FIREBASE_HOST}/history.json?orderBy=${encodeURIComponent('"ts"')}&limitToLast=3000`),
+      fetch(`${FIREBASE_HOST}/anomalies.json?orderBy=${encodeURIComponent('"ts"')}&limitToLast=100`)
+    ]);
+
+    if (!historyRes.ok || !anomaliesRes.ok) {
+      throw new Error(`Firebase ответил с ошибкой (history: ${historyRes.status}, anomalies: ${anomaliesRes.status})`);
+    }
+
+    const historyObj = await historyRes.json();
+    const anomaliesObj = await anomaliesRes.json();
+
+    allPoints = firebaseObjectToArray(historyObj).sort((a, b) => a.ts - b.ts);
+    lastAnomalies = firebaseObjectToArray(anomaliesObj).sort((a, b) => a.ts - b.ts);
+
+    redrawCharts();
+    renderAnomalies();
+
+    const statusLine = document.getElementById('status_line');
+    if (allPoints.length > 0) {
+      const last = new Date(allPoints[allPoints.length - 1].ts * 1000);
+      statusLine.textContent = 'Данные обновлены. Последнее показание: ' + last.toLocaleString('ru-RU');
+    } else {
+      statusLine.textContent = 'Данных пока нет — проверь, что ESP32 отправляет показания в Firebase.';
+    }
+  } catch (e) {
+    document.getElementById('status_line').textContent = 'Ошибка подключения к Firebase: ' + e.message;
+    console.error(e);
+  }
+};
+
+// ---------- Экспорт за период ----------
+const toEpoch = (id, fallback) => {
+  const v = document.getElementById(id).value;
+  return v ? Math.floor(new Date(v).getTime() / 1000) : fallback;
+};
+
+const csvEscape = (v) => String(v);
+
+document.getElementById('export_btn').addEventListener('click', () => {
+  const from = toEpoch('export_from', 0);
+  const to = toEpoch('export_to', 9999999999);
+  const rows = allPoints.filter(p => p.ts >= from && p.ts <= to);
+  if (rows.length === 0) { alert('Нет данных за этот период'); return; }
+  let csv = '\uFEFF' + 'Дата;Время;Температура_C;Влажность_%;Давление_гПа;eCO2_ppm;TVOC_ppb;Дождь_аналог;PM1;PM2.5\n';
+  rows.forEach(p => {
+    const d = new Date(p.ts * 1000);
+    const dateStr = d.toLocaleDateString('ru-RU');
+    const timeStr = d.toLocaleTimeString('ru-RU');
+    csv += `${dateStr};${timeStr};${csvEscape(p.temp)};${csvEscape(p.humidity)};${csvEscape(p.pressure)};${csvEscape(p.eco2)};${csvEscape(p.tvoc)};${csvEscape(p.rain)};${csvEscape(p.pm1)};${csvEscape(p.pm25)}\n`;
+  });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'eco_mon_export.csv';
+  link.click();
+});
+
+// ---------- Сравнение периодов ----------
+const averageForRange = (from, to) => {
+  const rows = allPoints.filter(p => p.ts >= from && p.ts <= to);
+  const avg = {};
+  metrics.forEach(m => { avg[m.key] = 0; });
+  rows.forEach(p => { metrics.forEach(m => { avg[m.key] += p[m.key] || 0; }); });
+  if (rows.length > 0) metrics.forEach(m => { avg[m.key] = +(avg[m.key] / rows.length).toFixed(2); });
+  return { avg, count: rows.length };
+};
+
+document.getElementById('cmp_btn').addEventListener('click', () => {
+  const f1 = toEpoch('cmp_from1', 0), t1 = toEpoch('cmp_to1', 9999999999);
+  const f2 = toEpoch('cmp_from2', 0), t2 = toEpoch('cmp_to2', 9999999999);
+  const r1 = averageForRange(f1, t1);
+  const r2 = averageForRange(f2, t2);
+  const rows = metrics.map(m => {
+    const v1 = r1.avg[m.key] || 0, v2 = r2.avg[m.key] || 0;
+    return `<tr><td>${m.label}</td><td>${v1}</td><td>${v2}</td><td>${(v2 - v1).toFixed(2)}</td></tr>`;
+  }).join('');
+  document.getElementById('cmp_result').innerHTML = `
+    <p>Точек в периоде 1: ${r1.count}, в периоде 2: ${r2.count}</p>
+    <table class="cmp-table"><tr><th>Показатель</th><th>Период 1</th><th>Период 2</th><th>Разница</th></tr>${rows}</table>
+  `;
+});
+
+// ---------- Конвертер CO2 ----------
+document.getElementById('co2_calc_btn').addEventListener('click', () => {
+  const from = toEpoch('co2_from', 0);
+  const to = toEpoch('co2_to', 9999999999);
+  const rows = allPoints.filter(p => p.ts >= from && p.ts <= to);
+  const box = document.getElementById('co2_result');
+  if (rows.length === 0) { box.textContent = 'Нет данных за этот период'; return; }
+
+  const avgPpm = rows.reduce((s, p) => s + p.eco2, 0) / rows.length;
+  const avgPressureHpa = rows.reduce((s, p) => s + p.pressure, 0) / rows.length;
+  const avgTempC = rows.reduce((s, p) => s + p.temp, 0) / rows.length;
+
+  const P = avgPressureHpa * 100;
+  const M = 44.01;
+  const R = 8.314;
+  const T = avgTempC + 273.15;
+  const concentration = (P * M * avgPpm * 0.001) / (R * T);
+
+  box.innerHTML = `
+    <p>Точек данных: ${rows.length}</p>
+    <p>Средний CO2: ${avgPpm.toFixed(2)} ppm, давление: ${avgPressureHpa.toFixed(2)} гПа, температура: ${avgTempC.toFixed(2)} °C</p>
+    <p class="val">Массовая концентрация: ${concentration.toFixed(4)} мг/м³</p>
+  `;
+});
+
+loadFromFirebase();
+setInterval(loadFromFirebase, 15000);
+</script>
+</body>
+</html>
