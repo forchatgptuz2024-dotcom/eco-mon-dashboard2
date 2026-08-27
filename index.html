@@ -281,8 +281,8 @@ const firebaseObjectToArray = (obj) => {
 const loadFromFirebase = async () => {
   try {
     const [historyRes, anomaliesRes] = await Promise.all([
-      fetch(`${FIREBASE_HOST}/history.json?orderBy=${encodeURIComponent('"ts"')}&limitToLast=3000`),
-      fetch(`${FIREBASE_HOST}/anomalies.json?orderBy=${encodeURIComponent('"ts"')}&limitToLast=100`)
+      fetch(`${FIREBASE_HOST}/history.json?orderBy=%22ts%22&limitToLast=3000`),
+      fetch(`${FIREBASE_HOST}/anomalies.json?orderBy=%22ts%22&limitToLast=100`)
     ]);
 
     if (!historyRes.ok || !anomaliesRes.ok) {
