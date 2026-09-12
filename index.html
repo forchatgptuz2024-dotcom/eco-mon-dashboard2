@@ -189,6 +189,10 @@
   .toggle-btn.active-toggle { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
   .leaflet-tooltip.device-map-label { background: var(--panel); color: var(--text); border: 1px solid var(--panel-line); font-family: var(--font-body); font-size: 0.75rem; padding: 2px 8px; box-shadow: none; }
   .leaflet-tooltip.device-map-label::before { display: none; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+  .leaflet-popup-content { margin: 12px 14px; font-family: var(--font-body); }
+  .leaflet-popup-close-button { color: var(--text-dim) !important; }
+  .map-popup-form select { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--panel-line); border-radius:6px; padding:6px; margin:6px 0; font-family:var(--font-body); font-size:0.85rem; }
 
   .tools-card { margin-top: 4px; }
   .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--panel-line); margin-bottom: 18px; flex-wrap: wrap; }
@@ -258,9 +262,23 @@
         <button class="dots-btn" id="devices_dots_btn">⋯</button>
         <div class="dots-panel" id="devices_dots_panel" style="display:none">
           <button class="dots-item" id="open_compare_btn">Сравнить устройства</button>
+          <button class="dots-item" id="open_groups_btn">Группы устройств</button>
         </div>
       </div>
       <div class="status-pill" id="status_line">Подключение к Firebase...</div>
+    </div>
+  </div>
+
+  <div class="card" id="groups_panel" style="display:none">
+    <div class="card-head">
+      <h3>Группы устройств</h3>
+      <button class="toggle-btn" id="groups_close_btn">Закрыть</button>
+    </div>
+    <div id="groups_list"></div>
+    <div class="formula-add-row" style="margin-top:14px; border-top:1px solid var(--panel-line); padding-top:14px;">
+      <input type="text" id="new_group_name" placeholder="Название группы">
+      <div class="device-checks" id="new_group_device_checks"></div>
+      <button class="action-btn" id="add_group_btn" style="align-self:flex-start">Создать группу</button>
     </div>
   </div>
 
@@ -273,6 +291,7 @@
       <label>Показатель:<select id="compare_metric"></select></label>
       <label>С:<input type="datetime-local" id="compare_devices_from"></label>
       <label>По:<input type="datetime-local" id="compare_devices_to"></label>
+      <label>Группа:<select id="compare_group_select"><option value="">Все</option></select></label>
       <button class="action-btn" id="compare_run_btn">Сравнить</button>
     </div>
     <div id="compare_device_checks" class="device-checks"></div>
@@ -304,26 +323,29 @@
       </div>
 
       <div class="card">
-        <h3>Карта устройств</h3>
-        <div id="device_map"></div>
-        <div class="map-slider-row">
-          <input type="range" id="map_day_slider" min="0" max="7" value="7" step="1">
-          <span id="map_day_label">Сейчас</span>
+        <div class="card-head">
+          <h3>Карта устройств</h3>
+          <button class="toggle-btn" id="map_toggle_btn">Развернуть</button>
         </div>
-        <div class="map-controls-row">
-          <div class="map-search-group">
-            <input type="text" id="map_search_input" placeholder="Введи адрес или город...">
-            <button class="action-btn" id="map_search_btn">Найти</button>
+        <div id="map_body" style="display:none">
+          <div id="device_map"></div>
+          <div class="map-slider-row">
+            <input type="range" id="map_day_slider" min="0" max="7" value="7" step="1">
+            <span id="map_day_label">Сейчас</span>
           </div>
-          <button class="toggle-btn" id="map_edit_toggle">Изменить положение</button>
-          <button class="toggle-btn" id="map_locate_btn">📍 Моё местоположение</button>
-          <button class="toggle-btn" id="map_clear_btn">Очистить метку</button>
-        </div>
-        <p class="hint" id="map_edit_hint" style="display:none">Кликни по карте, чтобы поставить или подвинуть метку для текущего устройства (маркер можно перетащить). Не забудь нажать «Сохранить».</p>
-        <div class="map-meta-row">
-          <label>Название текущего устройства:<input type="text" id="meta_name_input"></label>
-          <button class="action-btn" id="meta_save_btn">Сохранить</button>
-          <span id="meta_save_status"></span>
+          <div class="map-controls-row">
+            <div class="map-search-group">
+              <input type="text" id="map_search_input" placeholder="Введи адрес или город...">
+              <button class="action-btn" id="map_search_btn">Найти</button>
+            </div>
+            <button class="toggle-btn" id="map_locate_btn">📍 Моё местоположение</button>
+          </div>
+          <p class="hint">Кликни по любому месту на карте, чтобы привязать туда устройство.</p>
+          <div class="map-meta-row">
+            <label>Название текущего устройства:<input type="text" id="meta_name_input"></label>
+            <button class="action-btn" id="meta_save_btn">Сохранить название</button>
+            <span id="meta_save_status"></span>
+          </div>
         </div>
       </div>
 
@@ -529,8 +551,6 @@ const switchDevice = () => {
   allPoints = [];
   lastAnomalies = [];
   expandedAnomalyIdx = null;
-  pendingLat = null; pendingLng = null;
-  if (typeof editingPosition !== 'undefined' && editingPosition) stopEditingPosition();
   loadFromFirebase();
   loadThresholds();
   loadDeviceInfo();
@@ -942,7 +962,17 @@ document.getElementById('cmp_btn').addEventListener('click', () => {
 const renderCompareDeviceChecks = () => {
   document.getElementById('compare_device_checks').innerHTML = deviceOrder.map(id => `<label><input type="checkbox" value="${id}" checked> ${devices[id].name}</label>`).join('');
   document.getElementById('compare_metric').innerHTML = metrics.map(m => `<option value="${m.key}">${m.label}</option>`).join('');
+  const groupSel = document.getElementById('compare_group_select');
+  groupSel.innerHTML = '<option value="">Все</option>' + Object.keys(groups).map(gid => `<option value="${gid}">${groups[gid].name}</option>`).join('');
 };
+
+document.getElementById('compare_group_select').addEventListener('change', (e) => {
+  const gid = e.target.value;
+  const checks = document.querySelectorAll('#compare_device_checks input');
+  if (!gid) { checks.forEach(c => c.checked = true); return; }
+  const ids = new Set(groups[gid].deviceIds || []);
+  checks.forEach(c => c.checked = ids.has(c.value));
+});
 
 document.getElementById('compare_run_btn').addEventListener('click', async () => {
   const checked = [...document.querySelectorAll('#compare_device_checks input:checked')].map(i => i.value);
@@ -973,45 +1003,54 @@ document.getElementById('compare_run_btn').addEventListener('click', async () =>
 
 // ================== Карта устройств ==================
 let map, mapMarkers = {};
-let editingPosition = false;
-let pendingLat = null, pendingLng = null;
-let editMarker = null;
+let mapInitialized = false;
 
 const initMap = () => {
-  map = L.map('device_map', { zoomControl: true }).setView([55.75, 37.61], 3);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 18 }).addTo(map);
-  map.on('click', (e) => { if (editingPosition) placeEditMarker(e.latlng.lat, e.latlng.lng); });
+  map = L.map('device_map', { zoomControl: false, attributionControl: false }).setView([55.75, 37.61], 3);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  map.on('click', (e) => openDevicePlacementPopup(e.latlng));
 };
 
-const placeEditMarker = (lat, lng) => {
-  pendingLat = lat; pendingLng = lng;
-  if (editMarker) map.removeLayer(editMarker);
-  editMarker = L.marker([lat, lng], { draggable: true }).addTo(map)
-    .bindTooltip('Перетащи, если нужно точнее', { permanent: false });
-  editMarker.on('dragend', () => {
-    const pos = editMarker.getLatLng();
-    pendingLat = pos.lat; pendingLng = pos.lng;
-  });
-};
-
-const stopEditingPosition = () => {
-  editingPosition = false;
-  document.getElementById('map_edit_toggle').classList.remove('active-toggle');
-  document.getElementById('map_edit_hint').style.display = 'none';
-  if (editMarker) { map.removeLayer(editMarker); editMarker = null; }
-};
-
-document.getElementById('map_edit_toggle').addEventListener('click', () => {
-  if (!currentDeviceId) { alert('Выбери устройство'); return; }
-  if (editingPosition) { stopEditingPosition(); return; }
-  editingPosition = true;
-  document.getElementById('map_edit_toggle').classList.add('active-toggle');
-  document.getElementById('map_edit_hint').style.display = 'block';
-  const cur = devices[currentDeviceId];
-  const startLat = pendingLat != null ? pendingLat : (cur.lat != null ? cur.lat : map.getCenter().lat);
-  const startLng = pendingLng != null ? pendingLng : (cur.lng != null ? cur.lng : map.getCenter().lng);
-  placeEditMarker(startLat, startLng);
+document.getElementById('map_toggle_btn').addEventListener('click', () => {
+  const body = document.getElementById('map_body');
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? 'block' : 'none';
+  document.getElementById('map_toggle_btn').textContent = hidden ? 'Свернуть' : 'Развернуть';
+  if (hidden) {
+    if (!mapInitialized) { initMap(); mapInitialized = true; }
+    setTimeout(() => { map.invalidateSize(); renderDeviceMap(); }, 50);
+  }
 });
+
+const saveDeviceLocation = async (deviceId, lat, lng) => {
+  try {
+    await fetch(`${FIREBASE_HOST}/devices/${deviceId}/meta.json`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat, lng }) });
+    devices[deviceId].lat = lat; devices[deviceId].lng = lng;
+    renderDevicePicker();
+    renderDeviceMap();
+  } catch (e) { alert('Ошибка сохранения: ' + e.message); }
+};
+
+const openDevicePlacementPopup = (latlng) => {
+  if (deviceOrder.length === 0) return;
+  const options = deviceOrder.map(id => `<option value="${id}">${devices[id].name}</option>`).join('');
+  const html = `
+    <div class="map-popup-form">
+      <label style="font-size:0.8rem;color:var(--text-dim);display:block;">Привязать устройство сюда:</label>
+      <select id="popup_device_select">${options}</select>
+      <button class="action-btn" id="popup_place_btn" style="width:100%;">Поставить метку</button>
+    </div>`;
+  L.popup().setLatLng(latlng).setContent(html).openOn(map);
+  setTimeout(() => {
+    const btn = document.getElementById('popup_place_btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const id = document.getElementById('popup_device_select').value;
+      saveDeviceLocation(id, latlng.lat, latlng.lng);
+      map.closePopup();
+    });
+  }, 0);
+};
 
 document.getElementById('map_search_btn').addEventListener('click', async () => {
   const q = document.getElementById('map_search_input').value.trim();
@@ -1020,27 +1059,16 @@ document.getElementById('map_search_btn').addEventListener('click', async () => 
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
     const results = await res.json();
     if (!results.length) { alert('Ничего не найдено'); return; }
-    const lat = parseFloat(results[0].lat), lng = parseFloat(results[0].lon);
-    map.setView([lat, lng], 14);
-    if (editingPosition) placeEditMarker(lat, lng);
+    map.setView([parseFloat(results[0].lat), parseFloat(results[0].lon)], 14);
   } catch (e) { alert('Ошибка поиска: ' + e.message); }
 });
 
 document.getElementById('map_locate_btn').addEventListener('click', () => {
   if (!navigator.geolocation) { alert('Геолокация не поддерживается браузером'); return; }
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const { latitude, longitude } = pos.coords;
-      map.setView([latitude, longitude], 15);
-      if (editingPosition) placeEditMarker(latitude, longitude);
-    },
+    (pos) => map.setView([pos.coords.latitude, pos.coords.longitude], 15),
     (err) => alert('Не удалось получить местоположение: ' + err.message)
   );
-});
-
-document.getElementById('map_clear_btn').addEventListener('click', () => {
-  pendingLat = null; pendingLng = null;
-  if (editMarker) { map.removeLayer(editMarker); editMarker = null; }
 });
 
 const getStatusAtDayOffset = (d, dayOffset) => {
@@ -1064,11 +1092,21 @@ const renderDeviceMap = () => {
     const marker = L.circleMarker([d.lat, d.lng], { radius: 9, color: statusColor[status], fillColor: statusColor[status], fillOpacity: 0.85, weight: 2 })
       .addTo(map)
       .bindTooltip(d.name, { permanent: true, direction: 'top', className: 'device-map-label', offset: [0, -6] });
-    marker.on('click', () => { if (!editingPosition) { currentDeviceId = d.id; renderDevicePicker(); switchDevice(); } });
+    marker.on('click', () => {
+      currentDeviceId = d.id;
+      renderDevicePicker();
+      switchDevice();
+      const html = `<div class="map-popup-form"><b>${d.name}</b><br><button class="toggle-btn" id="popup_remove_btn" style="margin-top:8px;width:100%;">Убрать с карты</button></div>`;
+      marker.bindPopup(html).openPopup();
+      setTimeout(() => {
+        const rmBtn = document.getElementById('popup_remove_btn');
+        if (rmBtn) rmBtn.addEventListener('click', () => { saveDeviceLocation(d.id, null, null); map.closePopup(); });
+      }, 0);
+    });
     mapMarkers[d.id] = marker;
   });
-  if (withCoords.length === 1) map.setView([withCoords[0].lat, withCoords[0].lng], 10);
-  else map.fitBounds(L.latLngBounds(withCoords.map(d => [d.lat, d.lng])), { padding: [30, 30], maxZoom: 10 });
+  if (withCoords.length === 1) map.setView([withCoords[0].lat, withCoords[0].lng], 12);
+  else map.fitBounds(L.latLngBounds(withCoords.map(d => [d.lat, d.lng])), { padding: [40, 40], maxZoom: 12 });
 };
 
 document.getElementById('map_day_slider').addEventListener('input', (e) => {
@@ -1082,19 +1120,65 @@ document.getElementById('meta_save_btn').addEventListener('click', async () => {
   if (!currentDeviceId) { alert('Выбери устройство'); return; }
   const name = document.getElementById('meta_name_input').value.trim();
   const status = document.getElementById('meta_save_status');
-  const payload = {};
-  if (name) payload.name = name;
-  if (pendingLat != null && pendingLng != null) { payload.lat = pendingLat; payload.lng = pendingLng; }
-  else if (editingPosition && pendingLat == null) { payload.lat = null; payload.lng = null; } // метку очистили
+  if (!name) { status.textContent = 'Введи название'; setTimeout(() => status.textContent = '', 2000); return; }
   try {
-    await fetch(`${FIREBASE_HOST}/devices/${currentDeviceId}/meta.json`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    Object.assign(devices[currentDeviceId], payload);
+    await fetch(`${FIREBASE_HOST}/devices/${currentDeviceId}/meta.json`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    devices[currentDeviceId].name = name;
     renderDevicePicker();
-    stopEditingPosition();
     renderDeviceMap();
     status.textContent = 'Сохранено ✓';
   } catch (e) { status.textContent = 'Ошибка сохранения'; }
   setTimeout(() => status.textContent = '', 3000);
+});
+
+// ================== Группы устройств ==================
+let groups = {};
+
+const loadGroups = async () => {
+  try {
+    const res = await fetch(`${FIREBASE_HOST}/dashboard_meta/groups.json`);
+    groups = (await res.json()) || {};
+  } catch (e) { console.error(e); }
+};
+
+const saveGroupsToFirebase = async () => {
+  try {
+    await fetch(`${FIREBASE_HOST}/dashboard_meta/groups.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(groups) });
+  } catch (e) { console.error(e); }
+};
+
+document.getElementById('open_groups_btn').addEventListener('click', () => {
+  document.getElementById('devices_dots_panel').style.display = 'none';
+  document.getElementById('groups_panel').style.display = 'block';
+  renderGroupsPanel();
+});
+document.getElementById('groups_close_btn').addEventListener('click', () => {
+  document.getElementById('groups_panel').style.display = 'none';
+});
+
+const renderGroupsPanel = () => {
+  const list = document.getElementById('groups_list');
+  const ids = Object.keys(groups);
+  list.innerHTML = ids.length === 0 ? '<p class="hint">Пока нет ни одной группы</p>' : ids.map(gid => {
+    const g = groups[gid];
+    const names = (g.deviceIds || []).map(id => devices[id] ? devices[id].name : id).join(', ') || 'пусто';
+    return `<div class="formula-manage-item"><span class="fname">${g.name} <span class="hint">(${names})</span></span><button data-delgroup="${gid}">✕</button></div>`;
+  }).join('');
+  list.querySelectorAll('[data-delgroup]').forEach(btn => {
+    btn.addEventListener('click', () => { delete groups[btn.dataset.delgroup]; saveGroupsToFirebase(); renderGroupsPanel(); });
+  });
+  document.getElementById('new_group_device_checks').innerHTML = deviceOrder.map(id => `<label><input type="checkbox" value="${id}"> ${devices[id].name}</label>`).join('');
+};
+
+document.getElementById('add_group_btn').addEventListener('click', () => {
+  const name = document.getElementById('new_group_name').value.trim();
+  const checked = [...document.querySelectorAll('#new_group_device_checks input:checked')].map(i => i.value);
+  if (!name) { alert('Введи название группы'); return; }
+  const id = 'g_' + Date.now();
+  groups[id] = { id, name, deviceIds: checked };
+  saveGroupsToFirebase();
+  document.getElementById('new_group_name').value = '';
+  renderGroupsPanel();
 });
 
 // ================== Вкладки инструментов ==================
@@ -1206,8 +1290,7 @@ document.getElementById('co2_calc_btn').addEventListener('click', () => {
   }
   loadFormulas();
   loadDashboardTitle();
-  initMap();
-  renderDeviceMap();
+  loadGroups();
   setInterval(loadFromFirebase, 15000);
   setInterval(loadDeviceRegistry, 60000);
 })();
