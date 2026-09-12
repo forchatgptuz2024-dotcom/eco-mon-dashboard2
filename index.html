@@ -3,13 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Eco Mon 4.0 — облачный дашборд</title>
+<title>Eco Mon — облачный дашборд</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='3' fill='%23ffd166'/%3E%3Ccircle cx='12' cy='12' r='7' fill='none' stroke='%23ffd166' stroke-width='1.6' opacity='0.6'/%3E%3Ccircle cx='12' cy='12' r='11' fill='none' stroke='%23ffd166' stroke-width='1.2' opacity='0.3'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjs@12/lib/browser/math.js"></script>
 <style>
   :root {
     --bg: #0d0e10;
@@ -23,9 +26,7 @@
     --font-display: 'Space Grotesk', sans-serif;
     --font-body: 'Inter', sans-serif;
   }
-
   * { box-sizing: border-box; }
-
   body {
     font-family: var(--font-body);
     background:
@@ -40,47 +41,76 @@
     padding: 24px 20px 60px;
     line-height: 1.5;
   }
-
-  .page { max-width: 1320px; margin: 0 auto; }
-
+  .page { max-width: 1400px; margin: 0 auto; }
   h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; }
   h3 { font-size: 1rem; color: var(--text); letter-spacing: 0.01em; display: flex; align-items: center; gap: 8px; }
   h3 svg { width: 16px; height: 16px; color: var(--text-dim); flex-shrink: 0; }
 
-  /* ---------- Хедер ---------- */
   .topbar {
-    display: flex; justify-content: space-between; align-items: flex-end;
-    flex-wrap: wrap; gap: 12px; margin-bottom: 22px; padding-bottom: 18px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    flex-wrap: wrap; gap: 14px; margin-bottom: 22px; padding-bottom: 18px;
     border-bottom: 1px solid var(--panel-line);
   }
-  .topbar h1 { font-size: 1.5rem; }
+  .topbar h1 { font-size: 1.5rem; outline: none; cursor: text; border-bottom: 1px dashed transparent; }
+  .topbar h1:hover { border-bottom-color: var(--panel-line); }
+  .topbar h1:focus { border-bottom-color: var(--accent); }
   .topbar .subtitle { color: var(--text-dim); font-size: 0.85rem; margin-top: 4px; }
+  .topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
   .status-pill {
     display: inline-flex; align-items: center; gap: 8px;
     font-size: 0.8rem; color: var(--text-dim);
     background: var(--panel); border: 1px solid var(--panel-line);
     border-radius: 999px; padding: 6px 14px;
   }
-  .status-pill::before {
-    content: ''; width: 7px; height: 7px; border-radius: 50%;
-    background: var(--accent); flex-shrink: 0;
-  }
+  .status-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   .status-pill.status-ok::before { background: #4ade80; animation: dot-pulse 2s ease-in-out infinite; }
   .status-pill.status-stale::before { background: #f0ad4e; }
   .status-pill.status-lost::before { background: var(--danger); }
-  @keyframes dot-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.5); }
-    50% { box-shadow: 0 0 0 4px rgba(74,222,128,0); }
-  }
+  @keyframes dot-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.5); } 50% { box-shadow: 0 0 0 4px rgba(74,222,128,0); } }
 
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--panel-line);
-    border-radius: 12px;
-    padding: 18px;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  .status-dot { width:8px; height:8px; border-radius:50%; background:var(--text-dim); flex-shrink:0; display:inline-block; }
+  .status-dot.ok { background:#4ade80; }
+  .status-dot.attention { background:#f0ad4e; }
+  .status-dot.offline { background:var(--danger); }
+  .status-dot.unknown { background:var(--text-dim); }
+
+  .device-picker { position: relative; }
+  .device-picker-btn {
+    display:flex; align-items:center; gap:8px; background:var(--panel); color:var(--text);
+    border:1px solid var(--panel-line); border-radius:999px; padding:7px 14px; cursor:pointer;
+    font-family:var(--font-body); font-size:0.85rem;
   }
+  .device-picker-btn .chev { color:var(--text-dim); font-size:0.7rem; }
+  .device-picker-menu {
+    position:absolute; top:calc(100% + 6px); right:0; width:280px; background:var(--panel);
+    border:1px solid var(--panel-line); border-radius:10px; padding:10px; z-index:1200; box-shadow:0 10px 30px rgba(0,0,0,0.4);
+  }
+  .device-filter-tabs { display:flex; gap:6px; margin-bottom:8px; }
+  .filter-tab { flex:1; background:none; border:1px solid var(--panel-line); color:var(--text-dim); border-radius:6px; padding:5px; font-size:0.75rem; cursor:pointer; font-family:var(--font-body); }
+  .filter-tab.active { color:var(--accent); border-color:var(--accent); }
+  .device-list { max-height:260px; overflow-y:auto; }
+  .device-row { display:flex; align-items:center; gap:8px; padding:8px 6px; border-radius:6px; cursor:pointer; font-size:0.85rem; }
+  .device-row:hover { background:var(--bg); }
+  .device-row.current { background:var(--accent-soft); }
+  .device-row .name { flex:1; }
+  .device-row .sub { color:var(--text-dim); font-size:0.72rem; }
+
+  .dots-menu { position:relative; }
+  .dots-btn { background:var(--panel); border:1px solid var(--panel-line); color:var(--text-dim); border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:1rem; }
+  .dots-btn:hover { color:var(--accent); border-color:var(--accent); }
+  .dots-panel {
+    position:absolute; top:calc(100% + 6px); right:0; min-width:240px; background:var(--panel);
+    border:1px solid var(--panel-line); border-radius:10px; padding:8px; z-index:1200; box-shadow:0 10px 30px rgba(0,0,0,0.4);
+  }
+  .dots-item {
+    display:block; width:100%; text-align:left; background:none; border:none; color:var(--text);
+    padding:8px 10px; border-radius:6px; cursor:pointer; font-family:var(--font-body); font-size:0.85rem;
+  }
+  .dots-item:hover { background:var(--bg); color:var(--accent); }
+  .dots-check { display:flex; align-items:center; gap:8px; padding:6px 10px; font-size:0.85rem; cursor:pointer; }
+
+  .card { background: var(--panel); border: 1px solid var(--panel-line); border-radius: 12px; padding: 18px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
   .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 
   .main-btn, .toggle-btn {
@@ -93,10 +123,8 @@
   .val { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; margin-bottom: 6px; }
   .hint { color: var(--text-dim); font-size: 0.72rem; margin-top: 6px; }
 
-  /* ---------- Раскладка: графики + сайдбар ---------- */
   .layout { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
   @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
-
   .main-col { min-width: 0; }
   .sidebar { display: flex; flex-direction: column; gap: 20px; }
 
@@ -107,28 +135,29 @@
   }
   .range-selector button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 500; }
 
-  #main-container .card { border: 1px solid var(--accent-soft); background: linear-gradient(180deg, rgba(255,209,102,0.05), transparent 40%), var(--panel); box-shadow: 0 8px 28px rgba(255,209,102,0.07); }
-  #main-container canvas { max-height: 320px; }
-  #main-container .val { font-size: 2.4rem; color: var(--accent); display: inline-block; }
-  #main-container .val.pulse { animation: val-pulse 0.5s ease-out; }
-  @keyframes val-pulse {
-    0% { transform: scale(1); }
-    30% { transform: scale(1.06); color: #fff; }
-    100% { transform: scale(1); }
-  }
+  .chart-row { display: grid; grid-template-columns: 210px 1fr; gap: 16px; margin-bottom: 4px; align-items: start; }
+  @media (max-width: 760px) { .chart-row { grid-template-columns: 1fr; } }
+  .mini-strip-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .mini-strip { display:flex; flex-direction:column; gap:10px; max-height:660px; overflow-y:auto; }
+  .mini-strip .card { padding:10px 12px; margin-bottom:0; cursor:pointer; }
+  .mini-strip .card h3 { font-size:0.8rem; }
+  .mini-strip .val { font-size:1rem; margin-bottom:2px; }
+  .mini-strip canvas { max-height:56px !important; }
+  .mini-strip .hint, .mini-strip .main-btn { display:none; }
 
-  .quality-badge {
-    display: inline-block; font-size: 0.78rem; font-weight: 600; padding: 3px 10px;
-    border-radius: 999px; margin-left: 10px; vertical-align: middle;
-  }
-  .quality-good { background: rgba(74,222,128,0.15); color: #4ade80; }
-  .quality-medium { background: rgba(240,173,78,0.15); color: #f0ad4e; }
+  #main-container .card { border: 1px solid var(--accent-soft); background: linear-gradient(180deg, rgba(255,209,102,0.05), transparent 40%), var(--panel); box-shadow: 0 8px 28px rgba(255,209,102,0.07); }
+  #main-container canvas { max-height: 300px; }
+  #main-container .val { font-size: 2.4rem; color: var(--accent); display:inline-block; }
+  #main-container .val.pulse { animation: val-pulse 0.5s ease-out; }
+  @keyframes val-pulse { 0% { transform: scale(1); } 30% { transform: scale(1.06); color:#fff; } 100% { transform: scale(1); } }
+
+  .quality-badge { display:inline-block; font-size:0.78rem; font-weight:600; padding:3px 10px; border-radius:999px; margin-left:10px; vertical-align:middle; }
+  .quality-good { background: rgba(74,222,128,0.15); color:#4ade80; }
+  .quality-medium { background: rgba(240,173,78,0.15); color:#f0ad4e; }
   .quality-bad { background: rgba(239,71,111,0.15); color: var(--danger); }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-  .grid canvas { max-height: 180px; }
 
-  /* ---------- Сайдбар: заметки + аномалии ---------- */
   .device-info-card textarea {
     width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--panel-line);
     border-radius: 8px; padding: 10px; font-family: inherit; font-size: 0.85rem; resize: vertical; margin-bottom: 8px;
@@ -136,40 +165,45 @@
 
   .anomaly-card { border-color: rgba(239, 71, 111, 0.35); box-shadow: 0 8px 28px rgba(239,71,111,0.06); }
   .anomaly-card h3 { color: var(--danger); }
-  .anomaly-empty { display: flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 0.85rem; padding: 8px 0; }
-  .anomaly-empty svg { width: 20px; height: 20px; color: #4ade80; flex-shrink: 0; }
+  .anomaly-empty { display:flex; align-items:center; gap:10px; color: var(--text-dim); font-size:0.85rem; padding:8px 0; }
+  .anomaly-empty svg { width:20px; height:20px; color:#4ade80; flex-shrink:0; }
   .anomaly-list { max-height: 320px; overflow-y: auto; }
   .anomaly-item { padding: 9px 2px; border-bottom: 1px solid var(--panel-line); font-size: 0.85rem; cursor: pointer; }
   .anomaly-item:last-child { border-bottom: none; }
   .anomaly-item:hover { color: var(--accent); }
   .anomaly-item .time { color: var(--text-dim); margin-right: 8px; font-size: 0.78rem; }
   .anomaly-item .sensor { color: var(--accent); font-weight: 600; margin-right: 6px; }
-  .anomaly-snapshot {
-    background: var(--bg); border-radius: 8px; padding: 10px; margin: 4px 0 10px 0; font-size: 0.8rem;
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; color: var(--text-dim);
-  }
+  .anomaly-snapshot { background: var(--bg); border-radius: 8px; padding: 10px; margin: 4px 0 10px 0; font-size: 0.8rem; display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; color: var(--text-dim); }
 
-  /* ---------- Инструменты: вкладки ---------- */
+  #device_map { height: 340px; border-radius: 8px; overflow: hidden; }
+  .map-slider-row { display:flex; align-items:center; gap:12px; margin-top:12px; }
+  .map-slider-row input[type=range] { flex:1; }
+  .map-slider-row span { color: var(--text-dim); font-size:0.82rem; white-space:nowrap; }
+  .map-meta-row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin-top:14px; padding-top:14px; border-top:1px solid var(--panel-line); }
+  .map-meta-row label { font-size:0.8rem; color:var(--text-dim); display:block; margin-bottom:4px; }
+  .map-meta-row input { background:var(--bg); color:var(--text); border:1px solid var(--panel-line); border-radius:6px; padding:7px 9px; font-family:var(--font-body); font-size:0.85rem; width:200px; }
+
+  .map-controls-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:14px; }
+  .map-search-group { display:flex; gap:6px; flex:1; min-width:220px; }
+  .map-search-group input { flex:1; background:var(--bg); color:var(--text); border:1px solid var(--panel-line); border-radius:6px; padding:7px 9px; font-family:var(--font-body); font-size:0.85rem; }
+  .toggle-btn.active-toggle { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .leaflet-tooltip.device-map-label { background: var(--panel); color: var(--text); border: 1px solid var(--panel-line); font-family: var(--font-body); font-size: 0.75rem; padding: 2px 8px; box-shadow: none; }
+  .leaflet-tooltip.device-map-label::before { display: none; }
+
   .tools-card { margin-top: 4px; }
   .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--panel-line); margin-bottom: 18px; flex-wrap: wrap; }
-  .tab-btn {
-    background: none; border: none; color: var(--text-dim); font-family: var(--font-body);
-    font-size: 0.88rem; padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
-  }
+  .tab-btn { background: none; border: none; color: var(--text-dim); font-family: var(--font-body); font-size: 0.88rem; padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
 
   .period-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 10px; }
   .period-row label { font-size: 0.8rem; color: var(--text-dim); display: block; margin-bottom: 4px; }
-  input[type="datetime-local"], .settings-grid input {
+  input[type="datetime-local"], .settings-grid input, select {
     background: var(--bg); color: var(--text); border: 1px solid var(--panel-line);
     border-radius: 6px; padding: 7px 9px; font-family: var(--font-body); font-size: 0.85rem;
   }
-  button.action-btn {
-    background: var(--accent); color: #1a1400; border: none; padding: 9px 18px;
-    border-radius: 7px; cursor: pointer; font-weight: 600; font-family: var(--font-body); font-size: 0.85rem;
-  }
+  button.action-btn { background: var(--accent); color: #1a1400; border: none; padding: 9px 18px; border-radius: 7px; cursor: pointer; font-weight: 600; font-family: var(--font-body); font-size: 0.85rem; }
   button.action-btn:hover { filter: brightness(1.08); }
 
   .cmp-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.85rem; }
@@ -182,7 +216,18 @@
 
   .formula-note { color: var(--text-dim); font-size: 0.8rem; margin-bottom: 14px; }
   #settings_status, #device_info_status { color: var(--accent); font-size: 0.82rem; margin-left: 8px; }
-  #co2_result .val, #cmp_result p:first-child { color: var(--text-dim); font-weight: 400; font-size: 0.85rem; }
+
+  .device-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 6px; margin: 10px 0; }
+  .device-checks label { display:flex; align-items:center; gap:6px; font-size:0.85rem; }
+
+  .formula-manage-item { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid var(--panel-line); }
+  .formula-manage-item:last-child { border-bottom:none; }
+  .formula-manage-item .fname { flex:1; font-size:0.85rem; cursor:pointer; }
+  .formula-manage-item .fname.active { color:var(--accent); font-weight:600; }
+  .formula-manage-item button { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:0.8rem; }
+  .formula-manage-item button:hover { color:var(--danger); }
+  .formula-add-row { display:flex; flex-direction:column; gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid var(--panel-line); }
+  .formula-add-row input { background:var(--bg); color:var(--text); border:1px solid var(--panel-line); border-radius:6px; padding:6px 8px; font-size:0.85rem; width:100%; }
 </style>
 </head>
 <body>
@@ -190,14 +235,51 @@
 
   <div class="topbar">
     <div>
-      <h1>Eco Mon 4.0</h1>
+      <h1 id="dashboard_title" contenteditable="true" spellcheck="false">Eco Mon 4.0</h1>
       <div class="subtitle">Устройство комплексного экологического мониторинга</div>
     </div>
-    <div class="status-pill" id="status_line">Подключение к Firebase...</div>
+    <div class="topbar-right">
+      <div class="device-picker">
+        <button class="device-picker-btn" id="device_picker_btn">
+          <span class="status-dot" id="device_picker_dot"></span>
+          <span id="device_picker_label">Загрузка устройств...</span>
+          <span class="chev">▾</span>
+        </button>
+        <div class="device-picker-menu" id="device_picker_menu" style="display:none">
+          <div class="device-filter-tabs">
+            <button class="filter-tab active" data-filter="all">Все</button>
+            <button class="filter-tab" data-filter="active">Активные</button>
+            <button class="filter-tab" data-filter="attention">Внимание</button>
+          </div>
+          <div class="device-list" id="device_list"></div>
+        </div>
+      </div>
+      <div class="dots-menu">
+        <button class="dots-btn" id="devices_dots_btn">⋯</button>
+        <div class="dots-panel" id="devices_dots_panel" style="display:none">
+          <button class="dots-item" id="open_compare_btn">Сравнить устройства</button>
+        </div>
+      </div>
+      <div class="status-pill" id="status_line">Подключение к Firebase...</div>
+    </div>
+  </div>
+
+  <div class="card" id="compare_panel" style="display:none">
+    <div class="card-head">
+      <h3>Сравнение устройств</h3>
+      <button class="toggle-btn" id="compare_close_btn">Закрыть</button>
+    </div>
+    <div class="period-row">
+      <label>Показатель:<select id="compare_metric"></select></label>
+      <label>С:<input type="datetime-local" id="compare_devices_from"></label>
+      <label>По:<input type="datetime-local" id="compare_devices_to"></label>
+      <button class="action-btn" id="compare_run_btn">Сравнить</button>
+    </div>
+    <div id="compare_device_checks" class="device-checks"></div>
+    <div id="compare_result"></div>
   </div>
 
   <div class="layout">
-
     <div class="main-col">
       <div class="range-selector" id="range_selector">
         <button data-range="hour1" class="active">Последний час</button>
@@ -207,16 +289,50 @@
         <button data-range="all">Всё</button>
       </div>
 
-      <div id="main-container"></div>
+      <div class="chart-row">
+        <div class="mini-strip-wrap">
+          <div class="mini-strip-head">
+            <span class="hint" style="margin:0">Остальные графики</span>
+            <div class="dots-menu">
+              <button class="dots-btn" id="minis_dots_btn">⋯</button>
+              <div class="dots-panel" id="minis_dots_panel" style="display:none"></div>
+            </div>
+          </div>
+          <div class="mini-strip" id="mini_strip"></div>
+        </div>
+        <div id="main-container"></div>
+      </div>
 
-      <div class="grid" id="grid"></div>
+      <div class="card">
+        <h3>Карта устройств</h3>
+        <div id="device_map"></div>
+        <div class="map-slider-row">
+          <input type="range" id="map_day_slider" min="0" max="7" value="7" step="1">
+          <span id="map_day_label">Сейчас</span>
+        </div>
+        <div class="map-controls-row">
+          <div class="map-search-group">
+            <input type="text" id="map_search_input" placeholder="Введи адрес или город...">
+            <button class="action-btn" id="map_search_btn">Найти</button>
+          </div>
+          <button class="toggle-btn" id="map_edit_toggle">Изменить положение</button>
+          <button class="toggle-btn" id="map_locate_btn">📍 Моё местоположение</button>
+          <button class="toggle-btn" id="map_clear_btn">Очистить метку</button>
+        </div>
+        <p class="hint" id="map_edit_hint" style="display:none">Кликни по карте, чтобы поставить или подвинуть метку для текущего устройства (маркер можно перетащить). Не забудь нажать «Сохранить».</p>
+        <div class="map-meta-row">
+          <label>Название текущего устройства:<input type="text" id="meta_name_input"></label>
+          <button class="action-btn" id="meta_save_btn">Сохранить</button>
+          <span id="meta_save_status"></span>
+        </div>
+      </div>
 
       <div class="card tools-card">
         <div class="tabs" id="tools_tabs">
           <button class="tab-btn active" data-tab="tab_settings">Пороги</button>
           <button class="tab-btn" data-tab="tab_export">Экспорт</button>
-          <button class="tab-btn" data-tab="tab_compare">Сравнение</button>
-          <button class="tab-btn" data-tab="tab_co2">Конвертер CO₂</button>
+          <button class="tab-btn" data-tab="tab_compare_periods">Сравнение периодов</button>
+          <button class="tab-btn" data-tab="tab_formula"><span id="formula_tab_label">Конвертер CO₂</span></button>
         </div>
 
         <div class="tab-panel active" id="tab_settings">
@@ -234,7 +350,7 @@
           </div>
         </div>
 
-        <div class="tab-panel" id="tab_compare">
+        <div class="tab-panel" id="tab_compare_periods">
           <div class="period-row"><b style="font-size:0.85rem">Период 1:</b>
             <label>С:<input type="datetime-local" id="cmp_from1"></label>
             <label>По:<input type="datetime-local" id="cmp_to1"></label>
@@ -247,8 +363,14 @@
           <div id="cmp_result"></div>
         </div>
 
-        <div class="tab-panel" id="tab_co2">
-          <p class="formula-note">C = (P × M × ppm) / (R × T) × 0.001 — P: давление, Па; M = 44.01 г/моль; R = 8.314 Дж/(моль·К); T: температура, К</p>
+        <div class="tab-panel" id="tab_formula">
+          <div class="card-head" style="margin-bottom:10px">
+            <span id="formula_expr_note" class="formula-note" style="margin-bottom:0"></span>
+            <div class="dots-menu">
+              <button class="dots-btn" id="formula_dots_btn">⋯</button>
+              <div class="dots-panel" id="formula_dots_panel" style="display:none; min-width:300px"></div>
+            </div>
+          </div>
           <div class="period-row">
             <label>С:<input type="datetime-local" id="co2_from"></label>
             <label>По:<input type="datetime-local" id="co2_to"></label>
@@ -275,22 +397,172 @@
         <div id="anomaly_list" class="anomaly-list">Пока всё в норме</div>
       </div>
     </div>
-
   </div>
 </div>
 
 <script>
 // ================== НАСТРОЙКА ==================
 const FIREBASE_HOST = "https://eco-mon-9b4fe-default-rtdb.europe-west1.firebasedatabase.app";
-// Чтение публичное (иначе страница ничего не покажет без входа), запись защищена
-// авторизацией устройства — см. правила базы и настройки в прошивке ESP32.
-// =====================================================================================================
+// Чтение публичное, запись данных датчиков защищена авторизацией устройства.
+// Структура теперь мультиустройная: /devices/<ID>/...
 
+// ================== Устройства ==================
+let devices = {};       // id -> {id, name, lat, lng, lastTs, status, anomalies}
+let deviceOrder = [];
+let currentDeviceId = null;
+let deviceFilter = 'all';
+const statusLabelRu = { ok: 'Активно', attention: 'Внимание', offline: 'Offline', unknown: '—' };
+const statusColor = { ok: '#4ade80', attention: '#f0ad4e', offline: '#ef476f', unknown: '#8b8d92' };
+
+const devPath = (leaf) => currentDeviceId ? `/devices/${currentDeviceId}/${leaf}.json` : null;
+
+const loadDeviceRegistry = async () => {
+  try {
+    const res = await fetch(`${FIREBASE_HOST}/devices.json?shallow=true`);
+    const obj = await res.json();
+    const ids = obj ? Object.keys(obj) : [];
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    ids.forEach(id => { if (!devices[id]) devices[id] = { id, name: id, lat: null, lng: null, lastTs: 0, status: 'unknown', anomalies: [] }; });
+
+    await Promise.all(ids.map(async (id) => {
+      try {
+        const [metaRes, curRes, anomRes] = await Promise.all([
+          fetch(`${FIREBASE_HOST}/devices/${id}/meta.json`),
+          fetch(`${FIREBASE_HOST}/devices/${id}/current.json`),
+          fetch(`${FIREBASE_HOST}/devices/${id}/anomalies.json?orderBy=%22ts%22&limitToLast=50`)
+        ]);
+        const meta = await metaRes.json();
+        const cur = await curRes.json();
+        const anomObj = await anomRes.json();
+        const anomList = anomObj ? Object.values(anomObj).sort((a, b) => a.ts - b.ts) : [];
+
+        const d = devices[id];
+        d.name = (meta && meta.name) ? meta.name : id;
+        d.lat = (meta && meta.lat != null) ? meta.lat : null;
+        d.lng = (meta && meta.lng != null) ? meta.lng : null;
+        d.lastTs = (cur && cur.ts) ? cur.ts : 0;
+        d.anomalies = anomList;
+
+        const ageSec = nowSec - d.lastTs;
+        const recentAnomaly = anomList.length > 0 && (nowSec - anomList[anomList.length - 1].ts) < 3600;
+        if (!d.lastTs || ageSec > 900) d.status = 'offline';
+        else if (recentAnomaly) d.status = 'attention';
+        else d.status = 'ok';
+      } catch (e) { console.error('device', id, e); }
+    }));
+
+    deviceOrder = ids;
+    if (!currentDeviceId && ids.length > 0) currentDeviceId = ids[0];
+    renderDevicePicker();
+    renderDeviceMap();
+  } catch (e) { console.error(e); }
+};
+
+const renderDevicePicker = () => {
+  const dot = document.getElementById('device_picker_dot');
+  const label = document.getElementById('device_picker_label');
+  const cur = devices[currentDeviceId];
+  if (cur) { dot.className = 'status-dot ' + cur.status; label.textContent = cur.name; }
+  else { label.textContent = deviceOrder.length ? 'Выбери устройство' : 'Нет устройств'; }
+
+  const list = document.getElementById('device_list');
+  const filtered = deviceOrder.map(id => devices[id]).filter(d =>
+    deviceFilter === 'all' || (deviceFilter === 'active' && d.status === 'ok') || (deviceFilter === 'attention' && d.status === 'attention')
+  );
+  list.innerHTML = filtered.length === 0
+    ? '<div class="hint" style="padding:8px">Нет устройств в этой категории</div>'
+    : filtered.map(d => `
+      <div class="device-row ${d.id === currentDeviceId ? 'current' : ''}" data-id="${d.id}">
+        <span class="status-dot ${d.status}"></span>
+        <span class="name">${d.name}</span>
+        <span class="sub">${statusLabelRu[d.status] || ''}</span>
+      </div>`).join('');
+};
+
+document.getElementById('device_list').addEventListener('click', (e) => {
+  const row = e.target.closest('.device-row');
+  if (!row) return;
+  currentDeviceId = row.dataset.id;
+  document.getElementById('device_picker_menu').style.display = 'none';
+  renderDevicePicker();
+  switchDevice();
+});
+
+document.querySelectorAll('.filter-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    deviceFilter = btn.dataset.filter;
+    renderDevicePicker();
+  });
+});
+
+document.getElementById('device_picker_btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById('device_picker_menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+});
+
+// ---------- Обобщённые меню "три точки" ----------
+document.querySelectorAll('.dots-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const panel = btn.nextElementSibling;
+    document.querySelectorAll('.dots-panel, .device-picker-menu').forEach(p => { if (p !== panel) p.style.display = 'none'; });
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  });
+});
+document.querySelectorAll('.dots-panel, .device-picker-menu').forEach(p => p.addEventListener('click', e => e.stopPropagation()));
+document.addEventListener('click', () => document.querySelectorAll('.dots-panel, .device-picker-menu').forEach(p => p.style.display = 'none'));
+
+document.getElementById('open_compare_btn').addEventListener('click', () => {
+  document.getElementById('devices_dots_panel').style.display = 'none';
+  document.getElementById('compare_panel').style.display = 'block';
+  renderCompareDeviceChecks();
+});
+document.getElementById('compare_close_btn').addEventListener('click', () => {
+  document.getElementById('compare_panel').style.display = 'none';
+});
+
+const switchDevice = () => {
+  allPoints = [];
+  lastAnomalies = [];
+  expandedAnomalyIdx = null;
+  pendingLat = null; pendingLng = null;
+  if (typeof editingPosition !== 'undefined' && editingPosition) stopEditingPosition();
+  loadFromFirebase();
+  loadThresholds();
+  loadDeviceInfo();
+  const cur = devices[currentDeviceId];
+  document.getElementById('meta_name_input').value = cur ? cur.name : '';
+};
+
+// ================== Заголовок дашборда ==================
+const titleEl = document.getElementById('dashboard_title');
+const loadDashboardTitle = async () => {
+  try {
+    const res = await fetch(`${FIREBASE_HOST}/dashboard_meta/title.json`);
+    const t = await res.json();
+    if (t) titleEl.textContent = t;
+  } catch (e) { console.error(e); }
+};
+titleEl.addEventListener('blur', async () => {
+  const text = titleEl.textContent.trim() || 'Eco Mon';
+  titleEl.textContent = text;
+  try {
+    await fetch(`${FIREBASE_HOST}/dashboard_meta/title.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(text) });
+  } catch (e) { console.error(e); }
+});
+titleEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); } });
+
+// ================== Метрики и графики ==================
 let mainMetricKey = 'eco2';
 let currentRange = 'hour1';
-let allPoints = [];       // весь загруженный массив точек из Firebase
+let allPoints = [];
 let lastAnomalies = [];
 let expandedAnomalyIdx = null;
+let hiddenMetrics = JSON.parse(localStorage.getItem('ecomon_hidden_metrics') || '[]');
 
 const metrics = [
   {key:'eco2',    label:'CO2 (eCO2), ppm', color:'#ffd166'},
@@ -344,17 +616,14 @@ metrics.forEach(m => {
     options: {
       animation:false,
       scales: { x: { ticks:{ color:'#777', maxRotation:0 } }, y: { ticks:{ color:'#aaa' } } },
-      plugins: {
-        legend:{ display:false },
-        zoom: { pan:{ enabled:true, mode:'x' }, zoom:{ wheel:{ enabled:true }, pinch:{ enabled:true }, mode:'x' } }
-      }
+      plugins: { legend:{ display:false }, zoom: { pan:{ enabled:true, mode:'x' }, zoom:{ wheel:{ enabled:true }, pinch:{ enabled:true }, mode:'x' } } }
     }
   });
 });
 
 document.getElementById('main-container').appendChild(cardEls['eco2']);
 cardEls['eco2'].classList.add('main-chart');
-metrics.forEach(m => { if (m.key !== 'eco2') document.getElementById('grid').appendChild(cardEls[m.key]); });
+metrics.forEach(m => { if (m.key !== 'eco2') document.getElementById('mini_strip').appendChild(cardEls[m.key]); });
 
 const updateMainButtons = () => {
   metrics.forEach(m => {
@@ -365,14 +634,41 @@ const updateMainButtons = () => {
 };
 updateMainButtons();
 
+const renderMiniStripVisibility = () => {
+  metrics.forEach(m => {
+    if (m.key === mainMetricKey) return;
+    cardEls[m.key].style.display = hiddenMetrics.includes(m.key) ? 'none' : '';
+  });
+};
+
+const renderMinisDotsPanel = () => {
+  const panel = document.getElementById('minis_dots_panel');
+  panel.innerHTML = metrics.filter(m => m.key !== mainMetricKey).map(m => `
+    <label class="dots-check"><input type="checkbox" data-key="${m.key}" ${hiddenMetrics.includes(m.key) ? '' : 'checked'}> ${m.label}</label>
+  `).join('');
+  panel.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const key = inp.dataset.key;
+      if (inp.checked) hiddenMetrics = hiddenMetrics.filter(k => k !== key);
+      else hiddenMetrics.push(key);
+      localStorage.setItem('ecomon_hidden_metrics', JSON.stringify(hiddenMetrics));
+      renderMiniStripVisibility();
+    });
+  });
+};
+renderMinisDotsPanel();
+renderMiniStripVisibility();
+
 const setMainMetric = (key) => {
   if (key === mainMetricKey) return;
   cardEls[mainMetricKey].classList.remove('main-chart');
-  document.getElementById('grid').appendChild(cardEls[mainMetricKey]);
+  document.getElementById('mini_strip').appendChild(cardEls[mainMetricKey]);
   cardEls[key].classList.add('main-chart');
   document.getElementById('main-container').appendChild(cardEls[key]);
   mainMetricKey = key;
   updateMainButtons();
+  renderMiniStripVisibility();
+  renderMinisDotsPanel();
   Object.values(charts).forEach(c => c.resize());
 };
 
@@ -387,17 +683,13 @@ const formatTs = (ts, spanSec) => {
   return d.toLocaleDateString('ru-RU', {day:'2-digit', month:'2-digit'}) + ' ' + d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
 };
 
-const rangeToSeconds = (range) => {
-  const map = { hour1:3600, hour6:6*3600, day1:24*3600, day7:7*24*3600, all:Infinity };
-  return map[range] ?? 3600;
-};
+const rangeToSeconds = (range) => ({ hour1:3600, hour6:6*3600, day1:24*3600, day7:7*24*3600, all:Infinity }[range] ?? 3600);
 
 const filterByRange = (points, range) => {
   const spanSec = rangeToSeconds(range);
   if (spanSec === Infinity) return points;
   const nowTs = points.length ? points[points.length - 1].ts : Math.floor(Date.now()/1000);
-  const cutoff = nowTs - spanSec;
-  return points.filter(p => p.ts >= cutoff);
+  return points.filter(p => p.ts >= nowTs - spanSec);
 };
 
 const getAirQuality = (ppm) => {
@@ -421,18 +713,14 @@ const redrawCharts = () => {
       const valEl = document.getElementById('val_' + m.key);
       const newText = String(last[m.key]);
       if (m.key === mainMetricKey && valEl.textContent !== newText && valEl.textContent !== '--') {
-        valEl.classList.remove('pulse');
-        void valEl.offsetWidth; // перезапуск анимации
-        valEl.classList.add('pulse');
+        valEl.classList.remove('pulse'); void valEl.offsetWidth; valEl.classList.add('pulse');
       }
       valEl.textContent = newText;
     });
     const badge = document.getElementById('co2_quality');
     if (badge) {
       const q = getAirQuality(last.eco2);
-      badge.textContent = q.label;
-      badge.className = 'quality-badge ' + q.cls;
-      badge.style.display = 'inline-block';
+      badge.textContent = q.label; badge.className = 'quality-badge ' + q.cls; badge.style.display = 'inline-block';
     }
   }
 };
@@ -457,14 +745,10 @@ const renderAnomalies = () => {
     let html = `<div class="anomaly-item" data-idx="${idx}"><span class="time">${time}</span><span class="sensor">${a.sensor}</span>${a.message} (${a.value})</div>`;
     if (expandedAnomalyIdx === idx) {
       html += `<div class="anomaly-snapshot">
-        <div>Температура: ${a.temp} °C</div>
-        <div>Влажность: ${a.humidity} %</div>
-        <div>Давление: ${a.pressure} гПа</div>
-        <div>eCO2: ${a.eco2} ppm</div>
-        <div>TVOC: ${a.tvoc} ppb</div>
-        <div>Дождь: ${a.rain}</div>
-        <div>PM1: ${a.pm1}</div>
-        <div>PM2.5: ${a.pm25}</div>
+        <div>Температура: ${a.temp} °C</div><div>Влажность: ${a.humidity} %</div>
+        <div>Давление: ${a.pressure} гПа</div><div>eCO2: ${a.eco2} ppm</div>
+        <div>TVOC: ${a.tvoc} ppb</div><div>Дождь: ${a.rain}</div>
+        <div>PM1: ${a.pm1}</div><div>PM2.5: ${a.pm25}</div>
       </div>`;
     }
     return html;
@@ -479,30 +763,23 @@ document.getElementById('anomaly_list').addEventListener('click', (e) => {
   renderAnomalies();
 });
 
-// ---------- Заметки о расположении устройства ----------
+// ================== Заметки о расположении ==================
 const loadDeviceInfo = async () => {
+  if (!currentDeviceId) return;
   try {
-    const res = await fetch(`${FIREBASE_HOST}/device_info.json`);
-    if (res.ok) {
-      const text = await res.json();
-      document.getElementById('device_info_text').value = text || '';
-    }
+    const res = await fetch(`${FIREBASE_HOST}${devPath('device_info')}`);
+    if (res.ok) { const text = await res.json(); document.getElementById('device_info_text').value = text || ''; }
   } catch (e) { console.error(e); }
 };
 
 document.getElementById('device_info_save').addEventListener('click', async () => {
+  if (!currentDeviceId) { alert('Выбери устройство'); return; }
   const text = document.getElementById('device_info_text').value;
   const status = document.getElementById('device_info_status');
   try {
-    const res = await fetch(`${FIREBASE_HOST}/device_info.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(text)
-    });
+    const res = await fetch(`${FIREBASE_HOST}${devPath('device_info')}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(text) });
     status.textContent = res.ok ? 'Сохранено ✓' : 'Ошибка сохранения';
-  } catch (e) {
-    status.textContent = 'Ошибка сохранения';
-  }
+  } catch (e) { status.textContent = 'Ошибка сохранения'; }
   setTimeout(() => status.textContent = '', 2000);
 });
 
@@ -516,18 +793,7 @@ document.getElementById('device_info_toggle').addEventListener('click', () => {
   btn.textContent = hidden ? '▾' : '▸';
 });
 
-loadDeviceInfo();
-
-// ---------- Вкладки инструментов ----------
-document.getElementById('tools_tabs').addEventListener('click', (e) => {
-  if (!e.target.classList.contains('tab-btn')) return;
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  e.target.classList.add('active');
-  document.getElementById(e.target.dataset.tab).classList.add('active');
-});
-
-// ---------- Пороги срабатывания аномалий ----------
+// ================== Пороги ==================
 const settingsFields = [
   {key:'co2Warn', label:'CO2 — повышенный уровень, ppm'},
   {key:'co2Danger', label:'CO2 — опасный уровень, ppm'},
@@ -546,62 +812,48 @@ settingsFields.forEach(f => {
 });
 
 const loadThresholds = async () => {
+  if (!currentDeviceId) return;
   try {
-    const res = await fetch(`${FIREBASE_HOST}/thresholds.json`);
+    const res = await fetch(`${FIREBASE_HOST}${devPath('thresholds')}`);
     const d = await res.json();
     if (!d) return;
-    settingsFields.forEach(f => {
-      if (d[f.key] !== undefined) document.getElementById('set_' + f.key).value = d[f.key];
-    });
+    settingsFields.forEach(f => { if (d[f.key] !== undefined) document.getElementById('set_' + f.key).value = d[f.key]; });
   } catch (e) { console.error(e); }
 };
 
 document.getElementById('save_settings_btn').addEventListener('click', async () => {
+  if (!currentDeviceId) { alert('Выбери устройство'); return; }
   const status = document.getElementById('settings_status');
   const payload = {};
   settingsFields.forEach(f => { payload[f.key] = parseFloat(document.getElementById('set_' + f.key).value); });
   try {
-    const res = await fetch(`${FIREBASE_HOST}/thresholds.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const res = await fetch(`${FIREBASE_HOST}${devPath('thresholds')}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     status.textContent = res.ok ? 'Сохранено ✓ (устройство подхватит в течение минуты)' : 'Ошибка сохранения';
-  } catch (e) {
-    status.textContent = 'Ошибка сохранения';
-  }
+  } catch (e) { status.textContent = 'Ошибка сохранения'; }
   setTimeout(() => status.textContent = '', 4000);
 });
 
-loadThresholds();
-
-// ---------- Загрузка данных из Firebase ----------
-const firebaseObjectToArray = (obj) => {
-  if (!obj) return [];
-  return Object.values(obj);
-};
+// ================== Загрузка истории текущего устройства ==================
+const firebaseObjectToArray = (obj) => obj ? Object.values(obj) : [];
 
 const loadFromFirebase = async () => {
+  const statusLine = document.getElementById('status_line');
+  if (!currentDeviceId) { statusLine.textContent = 'Нет ни одного устройства'; return; }
   try {
     const [historyRes, anomaliesRes] = await Promise.all([
-      fetch(`${FIREBASE_HOST}/history.json?orderBy=%22ts%22&limitToLast=3000`),
-      fetch(`${FIREBASE_HOST}/anomalies.json?orderBy=%22ts%22&limitToLast=100`)
+      fetch(`${FIREBASE_HOST}${devPath('history')}?orderBy=%22ts%22&limitToLast=3000`),
+      fetch(`${FIREBASE_HOST}${devPath('anomalies')}?orderBy=%22ts%22&limitToLast=100`)
     ]);
-
-    if (!historyRes.ok || !anomaliesRes.ok) {
-      throw new Error(`Firebase ответил с ошибкой (history: ${historyRes.status}, anomalies: ${anomaliesRes.status})`);
-    }
+    if (!historyRes.ok || !anomaliesRes.ok) throw new Error(`Firebase ответил с ошибкой (history: ${historyRes.status}, anomalies: ${anomaliesRes.status})`);
 
     const historyObj = await historyRes.json();
     const anomaliesObj = await anomaliesRes.json();
-
     allPoints = firebaseObjectToArray(historyObj).sort((a, b) => a.ts - b.ts);
     lastAnomalies = firebaseObjectToArray(anomaliesObj).sort((a, b) => a.ts - b.ts);
 
     redrawCharts();
     renderAnomalies();
 
-    const statusLine = document.getElementById('status_line');
     if (allPoints.length > 0) {
       const lastTs = allPoints[allPoints.length - 1].ts;
       const last = new Date(lastTs * 1000);
@@ -615,33 +867,27 @@ const loadFromFirebase = async () => {
       statusLine.textContent = 'Данных пока нет';
     }
   } catch (e) {
-    document.getElementById('status_line').textContent = 'Ошибка подключения: ' + e.message;
+    statusLine.textContent = 'Ошибка подключения: ' + e.message;
     console.error(e);
   }
 };
 
-// ---------- Экспорт за период ----------
+// ================== Общие утилиты периодов ==================
 const toEpoch = (id, fallback) => {
   const v = document.getElementById(id).value;
   if (!v) return fallback;
   const t = new Date(v).getTime();
   return isNaN(t) ? fallback : Math.floor(t / 1000);
 };
-
 const csvEscape = (v) => String(v);
-
 const toLocalInputValue = (d) => {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-
 const setDateRange = (fromId, toId, fromDate, toDate) => {
   document.getElementById(fromId).value = toLocalInputValue(fromDate);
   document.getElementById(toId).value = toLocalInputValue(toDate);
 };
-
-// Заполняем поля периодов разумными значениями по умолчанию,
-// чтобы кнопки сразу работали без ручного выбора дат
 const nowDate = new Date();
 const h24ago = new Date(nowDate.getTime() - 24 * 3600 * 1000);
 const h48ago = new Date(nowDate.getTime() - 48 * 3600 * 1000);
@@ -649,7 +895,9 @@ setDateRange('export_from', 'export_to', h24ago, nowDate);
 setDateRange('cmp_from1', 'cmp_to1', h24ago, nowDate);
 setDateRange('cmp_from2', 'cmp_to2', h48ago, h24ago);
 setDateRange('co2_from', 'co2_to', h24ago, nowDate);
+setDateRange('compare_devices_from', 'compare_devices_to', h24ago, nowDate);
 
+// ---------- Экспорт за период (текущее устройство) ----------
 document.getElementById('export_btn').addEventListener('click', () => {
   const from = toEpoch('export_from', 0);
   const to = toEpoch('export_to', 9999999999);
@@ -658,22 +906,17 @@ document.getElementById('export_btn').addEventListener('click', () => {
   let csv = '\uFEFF' + 'Дата;Время;Температура_C;Влажность_%;Давление_гПа;eCO2_ppm;TVOC_ppb;Дождь_аналог;PM1;PM2.5\n';
   rows.forEach(p => {
     const d = new Date(p.ts * 1000);
-    const dateStr = d.toLocaleDateString('ru-RU');
-    const timeStr = d.toLocaleTimeString('ru-RU');
-    csv += `${dateStr};${timeStr};${csvEscape(p.temp)};${csvEscape(p.humidity)};${csvEscape(p.pressure)};${csvEscape(p.eco2)};${csvEscape(p.tvoc)};${csvEscape(p.rain)};${csvEscape(p.pm1)};${csvEscape(p.pm25)}\n`;
+    csv += `${d.toLocaleDateString('ru-RU')};${d.toLocaleTimeString('ru-RU')};${csvEscape(p.temp)};${csvEscape(p.humidity)};${csvEscape(p.pressure)};${csvEscape(p.eco2)};${csvEscape(p.tvoc)};${csvEscape(p.rain)};${csvEscape(p.pm1)};${csvEscape(p.pm25)}\n`;
   });
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = url;
-  link.download = 'eco_mon_export.csv';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  link.href = url; link.download = 'eco_mon_export.csv';
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
   URL.revokeObjectURL(url);
 });
 
-// ---------- Сравнение периодов ----------
+// ---------- Сравнение периодов (одно устройство) ----------
 const averageForRange = (from, to) => {
   const rows = allPoints.filter(p => p.ts >= from && p.ts <= to);
   const avg = {};
@@ -686,49 +929,288 @@ const averageForRange = (from, to) => {
 document.getElementById('cmp_btn').addEventListener('click', () => {
   const f1 = toEpoch('cmp_from1', 0), t1 = toEpoch('cmp_to1', 9999999999);
   const f2 = toEpoch('cmp_from2', 0), t2 = toEpoch('cmp_to2', 9999999999);
-  const r1 = averageForRange(f1, t1);
-  const r2 = averageForRange(f2, t2);
-  if (r1.count === 0 && r2.count === 0) {
-    document.getElementById('cmp_result').innerHTML = '<p>Нет данных ни за один из периодов. Проверь даты.</p>';
-    return;
-  }
+  const r1 = averageForRange(f1, t1), r2 = averageForRange(f2, t2);
+  if (r1.count === 0 && r2.count === 0) { document.getElementById('cmp_result').innerHTML = '<p>Нет данных ни за один из периодов. Проверь даты.</p>'; return; }
   const rows = metrics.map(m => {
     const v1 = r1.avg[m.key] || 0, v2 = r2.avg[m.key] || 0;
     return `<tr><td>${m.label}</td><td>${v1}</td><td>${v2}</td><td>${(v2 - v1).toFixed(2)}</td></tr>`;
   }).join('');
-  document.getElementById('cmp_result').innerHTML = `
-    <p>Точек в периоде 1: ${r1.count}, в периоде 2: ${r2.count}</p>
-    <table class="cmp-table"><tr><th>Показатель</th><th>Период 1</th><th>Период 2</th><th>Разница</th></tr>${rows}</table>
-  `;
+  document.getElementById('cmp_result').innerHTML = `<p>Точек в периоде 1: ${r1.count}, в периоде 2: ${r2.count}</p><table class="cmp-table"><tr><th>Показатель</th><th>Период 1</th><th>Период 2</th><th>Разница</th></tr>${rows}</table>`;
 });
 
-// ---------- Конвертер CO2 ----------
+// ---------- Сравнение НЕСКОЛЬКИХ устройств ----------
+const renderCompareDeviceChecks = () => {
+  document.getElementById('compare_device_checks').innerHTML = deviceOrder.map(id => `<label><input type="checkbox" value="${id}" checked> ${devices[id].name}</label>`).join('');
+  document.getElementById('compare_metric').innerHTML = metrics.map(m => `<option value="${m.key}">${m.label}</option>`).join('');
+};
+
+document.getElementById('compare_run_btn').addEventListener('click', async () => {
+  const checked = [...document.querySelectorAll('#compare_device_checks input:checked')].map(i => i.value);
+  const metricKey = document.getElementById('compare_metric').value;
+  const from = toEpoch('compare_devices_from', 0);
+  const to = toEpoch('compare_devices_to', 9999999999);
+  if (checked.length === 0) { alert('Выбери хотя бы одно устройство'); return; }
+
+  const results = await Promise.all(checked.map(async (id) => {
+    try {
+      const res = await fetch(`${FIREBASE_HOST}/devices/${id}/history.json?orderBy=%22ts%22&limitToLast=3000`);
+      const obj = await res.json();
+      const pts = firebaseObjectToArray(obj).filter(p => p.ts >= from && p.ts <= to);
+      const avg = pts.length ? pts.reduce((s, p) => s + (p[metricKey] || 0), 0) / pts.length : null;
+      return { id, name: devices[id].name, avg, count: pts.length };
+    } catch (e) { return { id, name: devices[id].name, avg: null, count: 0 }; }
+  }));
+
+  const valid = results.filter(r => r.avg != null);
+  const groupAvg = valid.length ? valid.reduce((s, r) => s + r.avg, 0) / valid.length : 0;
+  const rows = results.map(r => {
+    if (r.avg == null) return `<tr><td>${r.name}</td><td colspan="2">Нет данных</td></tr>`;
+    const diffPct = groupAvg ? ((r.avg - groupAvg) / groupAvg * 100).toFixed(1) : '0';
+    return `<tr><td>${r.name}</td><td>${r.avg.toFixed(2)}</td><td>${diffPct > 0 ? '+' : ''}${diffPct}%</td></tr>`;
+  }).join('');
+  document.getElementById('compare_result').innerHTML = `<table class="cmp-table"><tr><th>Устройство</th><th>Среднее</th><th>Отклонение от группы</th></tr>${rows}</table>`;
+});
+
+// ================== Карта устройств ==================
+let map, mapMarkers = {};
+let editingPosition = false;
+let pendingLat = null, pendingLng = null;
+let editMarker = null;
+
+const initMap = () => {
+  map = L.map('device_map', { zoomControl: true }).setView([55.75, 37.61], 3);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 18 }).addTo(map);
+  map.on('click', (e) => { if (editingPosition) placeEditMarker(e.latlng.lat, e.latlng.lng); });
+};
+
+const placeEditMarker = (lat, lng) => {
+  pendingLat = lat; pendingLng = lng;
+  if (editMarker) map.removeLayer(editMarker);
+  editMarker = L.marker([lat, lng], { draggable: true }).addTo(map)
+    .bindTooltip('Перетащи, если нужно точнее', { permanent: false });
+  editMarker.on('dragend', () => {
+    const pos = editMarker.getLatLng();
+    pendingLat = pos.lat; pendingLng = pos.lng;
+  });
+};
+
+const stopEditingPosition = () => {
+  editingPosition = false;
+  document.getElementById('map_edit_toggle').classList.remove('active-toggle');
+  document.getElementById('map_edit_hint').style.display = 'none';
+  if (editMarker) { map.removeLayer(editMarker); editMarker = null; }
+};
+
+document.getElementById('map_edit_toggle').addEventListener('click', () => {
+  if (!currentDeviceId) { alert('Выбери устройство'); return; }
+  if (editingPosition) { stopEditingPosition(); return; }
+  editingPosition = true;
+  document.getElementById('map_edit_toggle').classList.add('active-toggle');
+  document.getElementById('map_edit_hint').style.display = 'block';
+  const cur = devices[currentDeviceId];
+  const startLat = pendingLat != null ? pendingLat : (cur.lat != null ? cur.lat : map.getCenter().lat);
+  const startLng = pendingLng != null ? pendingLng : (cur.lng != null ? cur.lng : map.getCenter().lng);
+  placeEditMarker(startLat, startLng);
+});
+
+document.getElementById('map_search_btn').addEventListener('click', async () => {
+  const q = document.getElementById('map_search_input').value.trim();
+  if (!q) return;
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+    const results = await res.json();
+    if (!results.length) { alert('Ничего не найдено'); return; }
+    const lat = parseFloat(results[0].lat), lng = parseFloat(results[0].lon);
+    map.setView([lat, lng], 14);
+    if (editingPosition) placeEditMarker(lat, lng);
+  } catch (e) { alert('Ошибка поиска: ' + e.message); }
+});
+
+document.getElementById('map_locate_btn').addEventListener('click', () => {
+  if (!navigator.geolocation) { alert('Геолокация не поддерживается браузером'); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const { latitude, longitude } = pos.coords;
+      map.setView([latitude, longitude], 15);
+      if (editingPosition) placeEditMarker(latitude, longitude);
+    },
+    (err) => alert('Не удалось получить местоположение: ' + err.message)
+  );
+});
+
+document.getElementById('map_clear_btn').addEventListener('click', () => {
+  pendingLat = null; pendingLng = null;
+  if (editMarker) { map.removeLayer(editMarker); editMarker = null; }
+});
+
+const getStatusAtDayOffset = (d, dayOffset) => {
+  if (dayOffset >= 7) return d.status;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const dayStart = nowSec - (7 - dayOffset) * 86400;
+  const dayEnd = dayStart + 86400;
+  const hadAnomaly = (d.anomalies || []).some(a => a.ts >= dayStart && a.ts < dayEnd);
+  return hadAnomaly ? 'attention' : 'ok';
+};
+
+const renderDeviceMap = () => {
+  if (!map) return;
+  Object.values(mapMarkers).forEach(m => map.removeLayer(m));
+  mapMarkers = {};
+  const dayOffset = parseInt(document.getElementById('map_day_slider').value);
+  const withCoords = deviceOrder.map(id => devices[id]).filter(d => d.lat != null && d.lng != null);
+  if (withCoords.length === 0) return;
+  withCoords.forEach(d => {
+    const status = getStatusAtDayOffset(d, dayOffset);
+    const marker = L.circleMarker([d.lat, d.lng], { radius: 9, color: statusColor[status], fillColor: statusColor[status], fillOpacity: 0.85, weight: 2 })
+      .addTo(map)
+      .bindTooltip(d.name, { permanent: true, direction: 'top', className: 'device-map-label', offset: [0, -6] });
+    marker.on('click', () => { if (!editingPosition) { currentDeviceId = d.id; renderDevicePicker(); switchDevice(); } });
+    mapMarkers[d.id] = marker;
+  });
+  if (withCoords.length === 1) map.setView([withCoords[0].lat, withCoords[0].lng], 10);
+  else map.fitBounds(L.latLngBounds(withCoords.map(d => [d.lat, d.lng])), { padding: [30, 30], maxZoom: 10 });
+};
+
+document.getElementById('map_day_slider').addEventListener('input', (e) => {
+  const v = parseInt(e.target.value);
+  const label = document.getElementById('map_day_label');
+  label.textContent = v >= 7 ? 'Сейчас' : new Date(Date.now() - (7 - v) * 86400 * 1000).toLocaleDateString('ru-RU');
+  renderDeviceMap();
+});
+
+document.getElementById('meta_save_btn').addEventListener('click', async () => {
+  if (!currentDeviceId) { alert('Выбери устройство'); return; }
+  const name = document.getElementById('meta_name_input').value.trim();
+  const status = document.getElementById('meta_save_status');
+  const payload = {};
+  if (name) payload.name = name;
+  if (pendingLat != null && pendingLng != null) { payload.lat = pendingLat; payload.lng = pendingLng; }
+  else if (editingPosition && pendingLat == null) { payload.lat = null; payload.lng = null; } // метку очистили
+  try {
+    await fetch(`${FIREBASE_HOST}/devices/${currentDeviceId}/meta.json`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    Object.assign(devices[currentDeviceId], payload);
+    renderDevicePicker();
+    stopEditingPosition();
+    renderDeviceMap();
+    status.textContent = 'Сохранено ✓';
+  } catch (e) { status.textContent = 'Ошибка сохранения'; }
+  setTimeout(() => status.textContent = '', 3000);
+});
+
+// ================== Вкладки инструментов ==================
+document.getElementById('tools_tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab-btn');
+  if (!btn) return;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(btn.dataset.tab).classList.add('active');
+});
+
+// ================== Формулы (конструктор) ==================
+let formulas = [
+  { id: 'co2mass', name: 'Конвертер CO₂ → мг/м³', expr: '(pressure*100*44.01*eco2*0.001)/(8.314*(temp+273.15))', builtin: true }
+];
+let activeFormulaId = localStorage.getItem('ecomon_active_formula') || 'co2mass';
+
+const loadFormulas = async () => {
+  try {
+    const res = await fetch(`${FIREBASE_HOST}/dashboard_meta/formulas.json`);
+    const obj = await res.json();
+    if (obj) {
+      const ids = new Set(formulas.map(f => f.id));
+      Object.values(obj).forEach(f => { if (!ids.has(f.id)) formulas.push(f); });
+    }
+  } catch (e) { console.error(e); }
+  renderFormulaTab();
+};
+
+const saveFormulasToFirebase = async () => {
+  const custom = {};
+  formulas.filter(f => !f.builtin).forEach(f => { custom[f.id] = f; });
+  try {
+    await fetch(`${FIREBASE_HOST}/dashboard_meta/formulas.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(custom) });
+  } catch (e) { console.error(e); }
+};
+
+const renderFormulaTab = () => {
+  const active = formulas.find(f => f.id === activeFormulaId) || formulas[0];
+  activeFormulaId = active.id;
+  document.getElementById('formula_tab_label').textContent = active.name;
+  document.getElementById('formula_expr_note').textContent = 'Формула: ' + active.expr;
+  renderFormulaDotsPanel();
+};
+
+const renderFormulaDotsPanel = () => {
+  const panel = document.getElementById('formula_dots_panel');
+  const itemsHtml = formulas.map(f => `
+    <div class="formula-manage-item">
+      <span class="fname ${f.id === activeFormulaId ? 'active' : ''}" data-id="${f.id}">${f.name}</span>
+      ${f.builtin ? '' : `<button data-del="${f.id}">✕</button>`}
+    </div>`).join('');
+  panel.innerHTML = itemsHtml + `
+    <div class="formula-add-row">
+      <input type="text" id="new_formula_name" placeholder="Название формулы">
+      <input type="text" id="new_formula_expr" placeholder="Например: (pressure*100*44.01*eco2*0.001)/(8.314*(temp+273.15))">
+      <span class="hint">Переменные: temp, humidity, pressure, eco2, tvoc, rain, pm1, pm25</span>
+      <button class="action-btn" id="add_formula_btn" style="align-self:flex-start">Добавить формулу</button>
+    </div>`;
+  panel.querySelectorAll('.fname').forEach(el => {
+    el.addEventListener('click', () => { activeFormulaId = el.dataset.id; localStorage.setItem('ecomon_active_formula', activeFormulaId); renderFormulaTab(); });
+  });
+  panel.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      formulas = formulas.filter(f => f.id !== btn.dataset.del);
+      if (activeFormulaId === btn.dataset.del) activeFormulaId = formulas[0].id;
+      saveFormulasToFirebase(); renderFormulaTab();
+    });
+  });
+  document.getElementById('add_formula_btn').addEventListener('click', () => {
+    const name = document.getElementById('new_formula_name').value.trim();
+    const expr = document.getElementById('new_formula_expr').value.trim();
+    if (!name || !expr) { alert('Заполни название и формулу'); return; }
+    try { math.evaluate(expr, {temp:20,humidity:50,pressure:1013,eco2:400,tvoc:0,rain:0,pm1:0,pm25:0}); }
+    catch (e) { alert('Ошибка в формуле: ' + e.message); return; }
+    const id = 'f_' + Date.now();
+    formulas.push({ id, name, expr, builtin: false });
+    activeFormulaId = id;
+    localStorage.setItem('ecomon_active_formula', id);
+    saveFormulasToFirebase(); renderFormulaTab();
+  });
+};
+
 document.getElementById('co2_calc_btn').addEventListener('click', () => {
   const from = toEpoch('co2_from', 0);
   const to = toEpoch('co2_to', 9999999999);
   const rows = allPoints.filter(p => p.ts >= from && p.ts <= to);
   const box = document.getElementById('co2_result');
   if (rows.length === 0) { box.textContent = 'Нет данных за этот период'; return; }
-
-  const avgPpm = rows.reduce((s, p) => s + p.eco2, 0) / rows.length;
-  const avgPressureHpa = rows.reduce((s, p) => s + p.pressure, 0) / rows.length;
-  const avgTempC = rows.reduce((s, p) => s + p.temp, 0) / rows.length;
-
-  const P = avgPressureHpa * 100;
-  const M = 44.01;
-  const R = 8.314;
-  const T = avgTempC + 273.15;
-  const concentration = (P * M * avgPpm * 0.001) / (R * T);
-
-  box.innerHTML = `
-    <p>Точек данных: ${rows.length}</p>
-    <p>Средний CO2: ${avgPpm.toFixed(2)} ppm, давление: ${avgPressureHpa.toFixed(2)} гПа, температура: ${avgTempC.toFixed(2)} °C</p>
-    <p class="val">Массовая концентрация: ${concentration.toFixed(4)} мг/м³</p>
-  `;
+  const avg = {};
+  metrics.forEach(m => { avg[m.key] = rows.reduce((s, p) => s + (p[m.key] || 0), 0) / rows.length; });
+  const active = formulas.find(f => f.id === activeFormulaId) || formulas[0];
+  let result;
+  try { result = math.evaluate(active.expr, avg); }
+  catch (e) { box.innerHTML = `<p>Ошибка в формуле: ${e.message}</p>`; return; }
+  box.innerHTML = `<p>Точек данных: ${rows.length}</p><p class="val">${active.name}: ${typeof result === 'number' ? result.toFixed(4) : result}</p>`;
 });
 
-loadFromFirebase();
-setInterval(loadFromFirebase, 15000);
+// ================== Инициализация ==================
+(async () => {
+  await loadDeviceRegistry();
+  if (currentDeviceId) {
+    const cur = devices[currentDeviceId];
+    document.getElementById('meta_name_input').value = cur.name;
+    loadFromFirebase();
+    loadThresholds();
+    loadDeviceInfo();
+  }
+  loadFormulas();
+  loadDashboardTitle();
+  initMap();
+  renderDeviceMap();
+  setInterval(loadFromFirebase, 15000);
+  setInterval(loadDeviceRegistry, 60000);
+})();
 </script>
 </body>
 </html>
